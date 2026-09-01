@@ -1,0 +1,6 @@
+{
+  "name": "Music Nasir Khan",
+  "description": "Fascinating music player with dynamic spinning vinyl turntable disc, most-played tracks ranking, custom themes, visualizers, and playlists.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
