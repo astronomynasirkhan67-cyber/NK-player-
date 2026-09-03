@@ -49,6 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.model.AppTheme
 import com.example.data.model.Song
@@ -233,12 +234,23 @@ fun VinylDiscTurntable(
                     else -> R.drawable.img_cover_cyber
                 }
 
-                Image(
-                    painter = painterResource(id = coverDrawableId),
-                    contentDescription = "Album Cover",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (!song?.albumArtUri.isNullOrBlank()) {
+                    AsyncImage(
+                        model = song?.albumArtUri,
+                        contentDescription = "Album Cover",
+                        contentScale = ContentScale.Crop,
+                        error = painterResource(id = coverDrawableId),
+                        placeholder = painterResource(id = coverDrawableId),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Image(
+                        painter = painterResource(id = coverDrawableId),
+                        contentDescription = "Album Cover",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 // Center metallic spindle ring & hole
                 Box(

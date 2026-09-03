@@ -34,10 +34,13 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -102,17 +105,39 @@ fun VideosScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
-            Text(
-                text = "Music for Nasir • Video Hub",
-                color = Color.White,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "Shorts Reels (${shorts.size}) & Full Length Productions (${longVideos.size})",
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 12.sp
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        text = "Music for Nasir • Video Hub",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Shorts Reels (${shorts.size}) & Full Length Productions (${longVideos.size})",
+                        color = Color.White.copy(alpha = 0.6f),
+                        fontSize = 12.sp
+                    )
+                }
+
+                IconButton(
+                    onClick = { viewModel.scanLocalMedia(silent = false) },
+                    modifier = Modifier
+                        .background(Color.White.copy(alpha = 0.1f), CircleShape)
+                        .size(38.dp)
+                        .testTag("rescan_videos_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = "Rescan Videos",
+                        tint = Color(0xFF00E5FF)
+                    )
+                }
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -190,12 +215,55 @@ fun VideosScreen(
             else it.title.contains(searchQuery, ignoreCase = true) || it.artist.contains(searchQuery, ignoreCase = true)
         }
 
-        if (uiState.selectedVideoTab == 0 && activeList.isNotEmpty()) {
-            // Shorts / Reels vertical swipe experience
-            ShortsReelsPager(
-                shortsList = activeList,
-                viewModel = viewModel
-            )
+        if (uiState.selectedVideoTab == 0) {
+            if (activeList.isNotEmpty()) {
+                // Shorts / Reels vertical swipe experience
+                ShortsReelsPager(
+                    shortsList = activeList,
+                    viewModel = viewModel
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Videocam,
+                            contentDescription = null,
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(56.dp)
+                        )
+                        Text(
+                            text = "No Shorts found on your device.",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Short-form video clips under ${uiState.shortsThresholdSeconds} seconds will automatically appear here in vertical playback.",
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Button(
+                            onClick = { viewModel.scanLocalMedia() },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Scan Device Storage", color = Color.Black, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
         } else {
             // Long videos / Favorites catalog view
             LongVideosCatalogView(
@@ -203,7 +271,8 @@ fun VideosScreen(
                 viewModel = viewModel,
                 currentVideo = uiState.currentVideo,
                 isVideoPlaying = uiState.isVideoPlaying,
-                videoPositionSec = uiState.videoPositionSec
+                videoPositionSec = uiState.videoPositionSec,
+                isFavoriteTab = uiState.selectedVideoTab == 2
             )
         }
     }
@@ -479,6 +548,7 @@ fun LongVideosCatalogView(
     currentVideo: VideoItem?,
     isVideoPlaying: Boolean,
     videoPositionSec: Float,
+    isFavoriteTab: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     LazyColumn(
@@ -500,7 +570,7 @@ fun LongVideosCatalogView(
 
         item {
             Text(
-                text = "Video Library Catalog",
+                text = if (isFavoriteTab) "Favorite Videos" else "Video Library Catalog",
                 color = Color.White,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
@@ -510,17 +580,55 @@ fun LongVideosCatalogView(
 
         if (videos.isEmpty()) {
             item {
-                Box(
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF141721)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = 32.dp),
-                    contentAlignment = Alignment.Center
+                        .padding(vertical = 16.dp)
                 ) {
-                    Text(
-                        "No videos found in this category",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 14.sp
-                    )
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isFavoriteTab) Icons.Default.FavoriteBorder else Icons.Default.Movie,
+                            contentDescription = null,
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = if (isFavoriteTab) "No favorite videos yet." else "No videos found on your device.",
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = if (isFavoriteTab) {
+                                "Tap the heart icon on any video to add it to your favorites."
+                            } else {
+                                "Supported formats: MP4, MKV, AVI, MOV, WEBM and more. Make sure video files are stored on your device."
+                            },
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 12.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                        if (!isFavoriteTab) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Button(
+                                onClick = { viewModel.scanLocalMedia() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Scan Device Storage", color = Color.Black, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
                 }
             }
         } else {

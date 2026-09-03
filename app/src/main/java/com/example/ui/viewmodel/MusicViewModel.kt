@@ -60,7 +60,8 @@ data class MusicUiState(
     val selectedVideoTab: Int = 0, // 0 = Shorts, 1 = Long Videos, 2 = Favorites
     val shortsThresholdSeconds: Int = 60,
     val isScanningMedia: Boolean = false,
-    val scanStatusMessage: String? = null
+    val scanStatusMessage: String? = null,
+    val hasStoragePermission: Boolean = false
 )
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
@@ -71,7 +72,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         database.videoDao(),
         database.playbackHistoryDao()
     )
-    val audioEngine = MusicAudioEngine()
+    val audioEngine = MusicAudioEngine(application)
     private val mediaScanner = LocalMediaScanner(application)
 
     val allSongs: StateFlow<List<Song>> = repository.allSongs
@@ -155,31 +156,66 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var videoWatchJob: Job? = null
 
     init {
+        audioEngine.onCompletionListener = {
+            handleTrackCompletion()
+        }
+
         viewModelScope.launch {
             repository.ensureInitialData()
         }
 
-        // Initialize first song
+        // Synchronize current song with repository
         viewModelScope.launch {
             repository.allSongs.collect { songs ->
-                if (songs.isNotEmpty() && _uiState.value.currentSong == null) {
-                    playbackQueue = songs
-                    originalQueue = songs
-                    _uiState.value = _uiState.value.copy(
-                        currentSong = songs.first(),
-                        durationSec = songs.first().durationSeconds
-                    )
+                if (songs.isEmpty()) {
+                    playbackQueue = emptyList()
+                    originalQueue = emptyList()
+                    if (_uiState.value.currentSong != null) {
+                        _uiState.value = _uiState.value.copy(
+                            currentSong = null,
+                            durationSec = 0,
+                            currentPositionSec = 0f
+                        )
+                    }
+                } else {
+                    val current = _uiState.value.currentSong
+                    if (current == null || songs.none { it.id == current.id }) {
+                        val first = songs.first()
+                        playbackQueue = songs
+                        originalQueue = songs
+                        queueIndex = 0
+                        _uiState.value = _uiState.value.copy(
+                            currentSong = first,
+                            durationSec = first.durationSeconds
+                        )
+                    } else {
+                        // Update current song metadata if changed
+                        val updated = songs.firstOrNull { it.id == current.id }
+                        if (updated != null && updated != current) {
+                            _uiState.value = _uiState.value.copy(currentSong = updated)
+                        }
+                    }
                 }
             }
         }
 
-        // Initialize first video
+        // Synchronize current video with repository
         viewModelScope.launch {
             repository.allVideos.collect { videos ->
-                if (videos.isNotEmpty() && _uiState.value.currentVideo == null) {
-                    _uiState.value = _uiState.value.copy(
-                        currentVideo = videos.first()
-                    )
+                if (videos.isEmpty()) {
+                    if (_uiState.value.currentVideo != null) {
+                        _uiState.value = _uiState.value.copy(
+                            currentVideo = null,
+                            isVideoPlaying = false
+                        )
+                    }
+                } else {
+                    val current = _uiState.value.currentVideo
+                    if (current == null || videos.none { it.id == current.id }) {
+                        _uiState.value = _uiState.value.copy(
+                            currentVideo = videos.first()
+                        )
+                    }
                 }
             }
         }
@@ -575,26 +611,46 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.value = _uiState.value.copy(shortsThresholdSeconds = seconds)
     }
 
-    fun scanLocalMedia() {
+    private var lastScanTimestamp: Long = 0L
+
+    fun updatePermissionStatus(isGranted: Boolean) {
+        _uiState.value = _uiState.value.copy(hasStoragePermission = isGranted)
+        if (isGranted) {
+            scanLocalMedia(silent = false)
+        }
+    }
+
+    fun onAppResume(hasPermission: Boolean) {
+        _uiState.value = _uiState.value.copy(hasStoragePermission = hasPermission)
+        if (hasPermission) {
+            val now = System.currentTimeMillis()
+            // Rescan if 25+ seconds have elapsed or if initial scan hasn't happened
+            if (now - lastScanTimestamp > 25_000L || lastScanTimestamp == 0L) {
+                scanLocalMedia(silent = true)
+            }
+        }
+    }
+
+    fun scanLocalMedia(silent: Boolean = false) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isScanningMedia = true,
-                scanStatusMessage = "Scanning device storage for music and videos..."
+                scanStatusMessage = if (silent) null else "Scanning device storage for music and videos..."
             )
 
             try {
                 val scannedAudio = mediaScanner.scanLocalAudio()
                 val scannedVideos = mediaScanner.scanLocalVideos(_uiState.value.shortsThresholdSeconds)
 
-                if (scannedAudio.isNotEmpty()) {
-                    repository.insertScannedSongs(scannedAudio)
+                repository.syncScannedMedia(scannedAudio, scannedVideos)
+                lastScanTimestamp = System.currentTimeMillis()
+
+                val msg = if (scannedAudio.isEmpty() && scannedVideos.isEmpty()) {
+                    "No media found on device storage."
+                } else {
+                    "Discovered ${scannedAudio.size} songs and ${scannedVideos.size} videos from storage"
                 }
 
-                if (scannedVideos.isNotEmpty()) {
-                    repository.insertScannedVideos(scannedVideos)
-                }
-
-                val msg = "Discovered ${scannedAudio.size} songs and ${scannedVideos.size} videos from MediaStore"
                 _uiState.value = _uiState.value.copy(
                     isScanningMedia = false,
                     scanStatusMessage = msg

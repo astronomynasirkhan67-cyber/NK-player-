@@ -46,6 +46,15 @@ interface SongDao {
 
     @Query("SELECT COUNT(*) FROM songs")
     suspend fun getSongCount(): Int
+
+    @Query("DELETE FROM songs WHERE id LIKE 's%' AND length(id) <= 4 OR uri LIKE 'https://%' OR uri = ''")
+    suspend fun deleteLegacyDemoSongs()
+
+    @Query("SELECT id FROM songs")
+    suspend fun getAllSongIds(): List<String>
+
+    @Query("DELETE FROM songs WHERE id IN (:ids)")
+    suspend fun deleteSongsByIds(ids: List<String>)
 }
 
 @Dao
@@ -88,6 +97,15 @@ interface VideoDao {
 
     @Query("SELECT COUNT(*) FROM videos")
     suspend fun getVideoCount(): Int
+
+    @Query("DELETE FROM videos WHERE id LIKE 'v_%' OR uri LIKE 'https://%' OR uri = ''")
+    suspend fun deleteLegacyDemoVideos()
+
+    @Query("SELECT id FROM videos")
+    suspend fun getAllVideoIds(): List<String>
+
+    @Query("DELETE FROM videos WHERE id IN (:ids)")
+    suspend fun deleteVideosByIds(ids: List<String>)
 }
 
 @Dao
@@ -127,4 +145,7 @@ interface PlaylistDao {
 
     @Query("SELECT COUNT(*) FROM playlists")
     suspend fun getPlaylistCount(): Int
+
+    @Query("DELETE FROM playlist_songs WHERE songId NOT IN (SELECT id FROM songs)")
+    suspend fun cleanupOrphanedPlaylistSongs()
 }

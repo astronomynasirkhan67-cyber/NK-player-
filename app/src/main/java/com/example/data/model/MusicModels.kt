@@ -20,6 +20,7 @@ data class Song(
     val totalListeningTimeSeconds: Long = 0L,
     val completionCount: Int = 0,
     val uri: String = "",
+    val albumArtUri: String = "",
     val lyrics: String = ""
 )
 

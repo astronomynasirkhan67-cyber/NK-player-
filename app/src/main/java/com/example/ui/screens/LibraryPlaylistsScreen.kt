@@ -34,8 +34,10 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.PlaylistPlay
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Whatshot
+import coil.compose.AsyncImage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -176,18 +178,66 @@ fun LibraryPlaylistsScreen(
                             )
                         }
 
-                        IconButton(
-                            onClick = { viewModel.toggleCreatePlaylistDialog(true) },
-                            modifier = Modifier
-                                .background(primaryColor, CircleShape)
-                                .size(40.dp)
-                                .testTag("create_playlist_fab")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            IconButton(
+                                onClick = { viewModel.scanLocalMedia(silent = false) },
+                                modifier = Modifier
+                                    .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                                    .size(40.dp)
+                                    .testTag("rescan_media_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "Rescan Media",
+                                    tint = primaryColor
+                                )
+                            }
+
+                            IconButton(
+                                onClick = { viewModel.toggleCreatePlaylistDialog(true) },
+                                modifier = Modifier
+                                    .background(primaryColor, CircleShape)
+                                    .size(40.dp)
+                                    .testTag("create_playlist_fab")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "New Playlist",
+                                    tint = Color.Black
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Scan status banner
+                if (uiState.scanStatusMessage != null || uiState.isScanningMedia) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = primaryColor.copy(alpha = 0.12f)),
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "New Playlist",
-                                tint = Color.Black
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    tint = primaryColor,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = uiState.scanStatusMessage ?: "Scanning device storage...",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
                         }
                     }
                 }
@@ -277,18 +327,27 @@ fun LibraryPlaylistsScreen(
                         }
 
                         // Horizontal Most Played Cards
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            itemsIndexed(mostPlayedSongs.take(5)) { index, song ->
-                                MostPlayedCard(
-                                    rank = index + 1,
-                                    song = song,
-                                    isPlaying = uiState.isPlaying && uiState.currentSong?.id == song.id,
-                                    theme = uiState.currentTheme,
-                                    onClick = { onPlaySong(song, mostPlayedSongs) }
-                                )
+                        if (mostPlayedSongs.isEmpty()) {
+                            Text(
+                                text = "Play songs to view most-played rankings here.",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        } else {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                itemsIndexed(mostPlayedSongs.take(5)) { index, song ->
+                                    MostPlayedCard(
+                                        rank = index + 1,
+                                        song = song,
+                                        isPlaying = uiState.isPlaying && uiState.currentSong?.id == song.id,
+                                        theme = uiState.currentTheme,
+                                        onClick = { onPlaySong(song, mostPlayedSongs) }
+                                    )
+                                }
                             }
                         }
                     }
@@ -342,17 +401,66 @@ fun LibraryPlaylistsScreen(
                     }
                 }
 
-                // Song Items
-                items(filteredSongs) { song ->
-                    SongListItem(
-                        song = song,
-                        isCurrentPlaying = uiState.currentSong?.id == song.id,
-                        isPlaying = uiState.isPlaying && uiState.currentSong?.id == song.id,
-                        theme = uiState.currentTheme,
-                        onClick = { onPlaySong(song, filteredSongs) },
-                        onToggleFavorite = { viewModel.toggleFavorite(song) },
-                        onAddToPlaylist = { viewModel.setAddToPlaylistSong(song) }
-                    )
+                if (filteredSongs.isEmpty()) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(28.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MusicNote,
+                                    contentDescription = null,
+                                    tint = primaryColor,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Text(
+                                    text = "No songs found on your device.",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Supported formats: MP3, M4A, AAC, WAV, OGG, FLAC and more. Make sure audio files are saved in storage.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Button(
+                                    onClick = { viewModel.scanLocalMedia() },
+                                    colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.Black, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Scan Device Storage", color = Color.Black, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Song Items
+                    items(filteredSongs) { song ->
+                        SongListItem(
+                            song = song,
+                            isCurrentPlaying = uiState.currentSong?.id == song.id,
+                            isPlaying = uiState.isPlaying && uiState.currentSong?.id == song.id,
+                            theme = uiState.currentTheme,
+                            onClick = { onPlaySong(song, filteredSongs) },
+                            onToggleFavorite = { viewModel.toggleFavorite(song) },
+                            onAddToPlaylist = { viewModel.setAddToPlaylistSong(song) }
+                        )
+                    }
                 }
             }
         }
@@ -496,12 +604,23 @@ fun MostPlayedCard(
                     .height(110.dp)
                     .clip(RoundedCornerShape(12.dp))
             ) {
-                Image(
-                    painter = painterResource(id = coverDrawableId),
-                    contentDescription = "Cover",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (!song.albumArtUri.isNullOrBlank()) {
+                    AsyncImage(
+                        model = song.albumArtUri,
+                        contentDescription = "Cover",
+                        contentScale = ContentScale.Crop,
+                        error = painterResource(id = coverDrawableId),
+                        placeholder = painterResource(id = coverDrawableId),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Image(
+                        painter = painterResource(id = coverDrawableId),
+                        contentDescription = "Cover",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 // Rank badge
                 Box(
@@ -668,12 +787,23 @@ fun SongListItem(
                     .size(48.dp)
                     .clip(RoundedCornerShape(8.dp))
             ) {
-                Image(
-                    painter = painterResource(id = coverDrawableId),
-                    contentDescription = "Cover",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (!song.albumArtUri.isNullOrBlank()) {
+                    AsyncImage(
+                        model = song.albumArtUri,
+                        contentDescription = "Cover",
+                        contentScale = ContentScale.Crop,
+                        error = painterResource(id = coverDrawableId),
+                        placeholder = painterResource(id = coverDrawableId),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Image(
+                        painter = painterResource(id = coverDrawableId),
+                        contentDescription = "Cover",
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
                 if (isCurrentPlaying) {
                     Box(
                         modifier = Modifier

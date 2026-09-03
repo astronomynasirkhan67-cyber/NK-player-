@@ -18,7 +18,7 @@ import com.example.data.model.VideoItem
         VideoItem::class,
         PlaybackHistoryItem::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
