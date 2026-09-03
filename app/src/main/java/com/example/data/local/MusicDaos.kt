@@ -62,10 +62,10 @@ interface VideoDao {
     @Query("SELECT * FROM videos ORDER BY title ASC")
     fun getAllVideos(): Flow<List<VideoItem>>
 
-    @Query("SELECT * FROM videos WHERE isShort = 1 ORDER BY addedAt DESC")
+    @Query("SELECT * FROM videos WHERE isShort = 1 AND durationSeconds > 0 AND durationSeconds <= 60 ORDER BY addedAt DESC")
     fun getShorts(): Flow<List<VideoItem>>
 
-    @Query("SELECT * FROM videos WHERE isShort = 0 ORDER BY addedAt DESC")
+    @Query("SELECT * FROM videos WHERE (isShort = 0 OR durationSeconds > 60) AND durationSeconds > 0 ORDER BY addedAt DESC")
     fun getLongVideos(): Flow<List<VideoItem>>
 
     @Query("SELECT * FROM videos ORDER BY playCount DESC, lastWatchedTimestamp DESC")

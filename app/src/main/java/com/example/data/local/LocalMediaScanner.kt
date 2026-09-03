@@ -249,7 +249,7 @@ class LocalMediaScanner(private val context: Context) {
                             id
                         ).toString()
 
-                        val isShort = durationSec <= shortsThresholdSeconds
+                        val isShort = durationSec in 1..shortsThresholdSeconds
 
                         videoList.add(
                             VideoItem(

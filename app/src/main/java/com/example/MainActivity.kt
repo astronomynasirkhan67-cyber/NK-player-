@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.Movie
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Album
 import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.LibraryMusic
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Palette
@@ -67,6 +69,7 @@ import com.example.ui.components.EqualizerDialog
 import com.example.ui.components.MiniPlayerBar
 import com.example.ui.screens.LibraryPlaylistsScreen
 import com.example.ui.screens.NowPlayingScreen
+import com.example.ui.screens.ShortsFeedScreen
 import com.example.ui.screens.StatsScreen
 import com.example.ui.screens.ThemesSoundLabScreen
 import com.example.ui.screens.VideosScreen
@@ -134,9 +137,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     Scaffold(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .statusBarsPadding(),
+                        modifier = Modifier.fillMaxSize(),
                         bottomBar = {
                             val primaryColor = Color(uiState.currentTheme.primaryHex)
                             val surfaceColor = MaterialTheme.colorScheme.surface
@@ -154,7 +155,7 @@ class MainActivity : ComponentActivity() {
                                         )
                                     )
                                     .navigationBarsPadding()
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
                             ) {
                                 NavigationBar(
                                     modifier = Modifier
@@ -189,7 +190,7 @@ class MainActivity : ComponentActivity() {
                                         label = {
                                             Text(
                                                 "Player",
-                                                fontSize = 11.sp,
+                                                fontSize = 10.sp,
                                                 fontWeight = if (uiState.currentTab == NavigationTab.NOW_PLAYING) FontWeight.Bold else FontWeight.Normal
                                             )
                                         },
@@ -216,7 +217,7 @@ class MainActivity : ComponentActivity() {
                                         label = {
                                             Text(
                                                 "Music",
-                                                fontSize = 11.sp,
+                                                fontSize = 10.sp,
                                                 fontWeight = if (uiState.currentTab == NavigationTab.PLAYLISTS) FontWeight.Bold else FontWeight.Normal
                                             )
                                         },
@@ -230,7 +231,34 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.testTag("nav_tab_playlists")
                                     )
 
-                                    // 3. Videos (Shorts & Long Videos)
+                                    // 3. Shorts (Pure Fullscreen Vertical Feed)
+                                    NavigationBarItem(
+                                        selected = uiState.currentTab == NavigationTab.SHORTS,
+                                        onClick = { viewModel.setTab(NavigationTab.SHORTS) },
+                                        icon = {
+                                            Icon(
+                                                imageVector = if (uiState.currentTab == NavigationTab.SHORTS) Icons.Filled.Bolt else Icons.Outlined.Bolt,
+                                                contentDescription = "Shorts"
+                                            )
+                                        },
+                                        label = {
+                                            Text(
+                                                "Shorts",
+                                                fontSize = 10.sp,
+                                                fontWeight = if (uiState.currentTab == NavigationTab.SHORTS) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = Color.Black,
+                                            selectedTextColor = primaryColor,
+                                            indicatorColor = primaryColor,
+                                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        modifier = Modifier.testTag("nav_tab_shorts")
+                                    )
+
+                                    // 4. Long Videos
                                     NavigationBarItem(
                                         selected = uiState.currentTab == NavigationTab.VIDEOS,
                                         onClick = { viewModel.setTab(NavigationTab.VIDEOS) },
@@ -243,7 +271,7 @@ class MainActivity : ComponentActivity() {
                                         label = {
                                             Text(
                                                 "Videos",
-                                                fontSize = 11.sp,
+                                                fontSize = 10.sp,
                                                 fontWeight = if (uiState.currentTab == NavigationTab.VIDEOS) FontWeight.Bold else FontWeight.Normal
                                             )
                                         },
@@ -257,7 +285,7 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.testTag("nav_tab_videos")
                                     )
 
-                                    // 4. Statistics
+                                    // 5. Statistics
                                     NavigationBarItem(
                                         selected = uiState.currentTab == NavigationTab.STATS,
                                         onClick = { viewModel.setTab(NavigationTab.STATS) },
@@ -270,7 +298,7 @@ class MainActivity : ComponentActivity() {
                                         label = {
                                             Text(
                                                 "Stats",
-                                                fontSize = 11.sp,
+                                                fontSize = 10.sp,
                                                 fontWeight = if (uiState.currentTab == NavigationTab.STATS) FontWeight.Bold else FontWeight.Normal
                                             )
                                         },
@@ -284,7 +312,7 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.testTag("nav_tab_stats")
                                     )
 
-                                    // 5. Themes & Lab Settings
+                                    // 6. Themes & Lab Settings
                                     NavigationBarItem(
                                         selected = uiState.currentTab == NavigationTab.THEMES_LAB,
                                         onClick = { viewModel.setTab(NavigationTab.THEMES_LAB) },
@@ -297,7 +325,7 @@ class MainActivity : ComponentActivity() {
                                         label = {
                                             Text(
                                                 "Themes",
-                                                fontSize = 11.sp,
+                                                fontSize = 10.sp,
                                                 fontWeight = if (uiState.currentTab == NavigationTab.THEMES_LAB) FontWeight.Bold else FontWeight.Normal
                                             )
                                         },
@@ -314,12 +342,17 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     ) { innerPadding ->
+                        val isShorts = uiState.currentTab == NavigationTab.SHORTS
+
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .padding(innerPadding)
+                                .padding(
+                                    top = if (isShorts) 0.dp else innerPadding.calculateTopPadding(),
+                                    bottom = innerPadding.calculateBottomPadding()
+                                )
                         ) {
-                            if (!uiState.hasStoragePermission) {
+                            if (!uiState.hasStoragePermission && !isShorts) {
                                 Card(
                                     colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1515)),
                                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.5f)),
@@ -369,6 +402,7 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .weight(1f)
+                                    .then(if (isShorts) Modifier else Modifier.statusBarsPadding())
                             ) {
                             when (uiState.currentTab) {
                                 NavigationTab.NOW_PLAYING -> {
@@ -399,6 +433,12 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
 
+                                NavigationTab.SHORTS -> {
+                                    ShortsFeedScreen(
+                                        viewModel = viewModel
+                                    )
+                                }
+
                                 NavigationTab.VIDEOS -> {
                                     VideosScreen(
                                         viewModel = viewModel
@@ -418,9 +458,10 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
-                            // Floating Mini Player when not on NowPlaying or Videos screen
+                            // Floating Mini Player when not on NowPlaying, Videos, or Shorts screen
                             if (uiState.currentTab != NavigationTab.NOW_PLAYING &&
                                 uiState.currentTab != NavigationTab.VIDEOS &&
+                                uiState.currentTab != NavigationTab.SHORTS &&
                                 uiState.currentSong != null &&
                                 !uiState.isVideoPlaying
                             ) {

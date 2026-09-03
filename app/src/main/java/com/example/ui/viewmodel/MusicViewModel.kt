@@ -30,7 +30,7 @@ enum class RepeatMode {
 }
 
 enum class NavigationTab {
-    NOW_PLAYING, PLAYLISTS, VIDEOS, STATS, THEMES_LAB
+    NOW_PLAYING, PLAYLISTS, SHORTS, VIDEOS, STATS, THEMES_LAB
 }
 
 data class MusicUiState(
