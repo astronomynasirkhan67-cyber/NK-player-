@@ -16,7 +16,51 @@ data class Song(
     val playCount: Int = 0,
     val isFavorite: Boolean = false,
     val lastPlayedTimestamp: Long = 0L,
+    val firstPlayedTimestamp: Long = 0L,
+    val totalListeningTimeSeconds: Long = 0L,
+    val completionCount: Int = 0,
+    val uri: String = "",
     val lyrics: String = ""
+)
+
+@Entity(tableName = "videos")
+data class VideoItem(
+    @PrimaryKey val id: String,
+    val title: String,
+    val artist: String,
+    val uri: String,
+    val durationSeconds: Int,
+    val isShort: Boolean = false,
+    val resolution: String = "1080p",
+    val playCount: Int = 0,
+    val lastWatchedTimestamp: Long = 0L,
+    val firstPlayedTimestamp: Long = 0L,
+    val totalWatchTimeSeconds: Long = 0L,
+    val completionCount: Int = 0,
+    val isFavorite: Boolean = false,
+    val addedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "playback_history")
+data class PlaybackHistoryItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0L,
+    val mediaId: String,
+    val mediaType: String, // "MUSIC" or "VIDEO"
+    val title: String,
+    val subtitle: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val durationPlayedSeconds: Int = 0
+)
+
+data class OverallStatistics(
+    val totalMusicPlays: Int = 0,
+    val totalListeningTimeSeconds: Long = 0L,
+    val totalMusicCompletions: Int = 0,
+    val totalVideoPlays: Int = 0,
+    val totalVideoWatchTimeSeconds: Long = 0L,
+    val totalVideoCompletions: Int = 0,
+    val totalShortsCount: Int = 0,
+    val totalLongVideosCount: Int = 0
 )
 
 @Entity(tableName = "playlists")

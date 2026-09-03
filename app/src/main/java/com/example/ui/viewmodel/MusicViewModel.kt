@@ -5,10 +5,14 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.MusicAudioEngine
 import com.example.data.local.AppDatabase
+import com.example.data.local.LocalMediaScanner
 import com.example.data.model.AppTheme
 import com.example.data.model.EqualizerSettings
+import com.example.data.model.OverallStatistics
+import com.example.data.model.PlaybackHistoryItem
 import com.example.data.model.Playlist
 import com.example.data.model.Song
+import com.example.data.model.VideoItem
 import com.example.data.repository.MusicRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -20,14 +24,13 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.util.Collections
 
 enum class RepeatMode {
     OFF, ALL, ONE
 }
 
 enum class NavigationTab {
-    NOW_PLAYING, PLAYLISTS, THEMES_LAB
+    NOW_PLAYING, PLAYLISTS, VIDEOS, STATS, THEMES_LAB
 }
 
 data class MusicUiState(
@@ -49,13 +52,27 @@ data class MusicUiState(
     val showLyrics: Boolean = false,
     val showEqualizerDialog: Boolean = false,
     val showCreatePlaylistDialog: Boolean = false,
-    val showAddToPlaylistDialog: Song? = null
+    val showAddToPlaylistDialog: Song? = null,
+    // Video state
+    val currentVideo: VideoItem? = null,
+    val isVideoPlaying: Boolean = false,
+    val videoPositionSec: Float = 0f,
+    val selectedVideoTab: Int = 0, // 0 = Shorts, 1 = Long Videos, 2 = Favorites
+    val shortsThresholdSeconds: Int = 60,
+    val isScanningMedia: Boolean = false,
+    val scanStatusMessage: String? = null
 )
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val database = AppDatabase.getDatabase(application)
-    private val repository = MusicRepository(database.songDao(), database.playlistDao())
+    private val repository = MusicRepository(
+        database.songDao(),
+        database.playlistDao(),
+        database.videoDao(),
+        database.playbackHistoryDao()
+    )
     val audioEngine = MusicAudioEngine()
+    private val mediaScanner = LocalMediaScanner(application)
 
     val allSongs: StateFlow<List<Song>> = repository.allSongs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -69,6 +86,64 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val allPlaylists: StateFlow<List<Playlist>> = repository.allPlaylists
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val allVideos: StateFlow<List<VideoItem>> = repository.allVideos
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val shorts: StateFlow<List<VideoItem>> = repository.shorts
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val longVideos: StateFlow<List<VideoItem>> = repository.longVideos
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val mostWatchedVideos: StateFlow<List<VideoItem>> = repository.mostWatchedVideos
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val favoriteVideos: StateFlow<List<VideoItem>> = repository.favoriteVideos
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val recentHistory: StateFlow<List<PlaybackHistoryItem>> = repository.recentHistory
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Overall real statistics
+    val statistics: StateFlow<OverallStatistics> = combine(
+        repository.allSongs,
+        repository.allVideos
+    ) { songs, videos ->
+        var totalMusicPlays = 0
+        var totalListeningTime = 0L
+        var totalMusicCompletions = 0
+
+        for (song in songs) {
+            totalMusicPlays += song.playCount
+            totalListeningTime += song.totalListeningTimeSeconds
+            totalMusicCompletions += song.completionCount
+        }
+
+        var totalVideoPlays = 0
+        var totalVideoWatchTime = 0L
+        var totalVideoCompletions = 0
+        var shortsCount = 0
+        var longVideosCount = 0
+
+        for (video in videos) {
+            totalVideoPlays += video.playCount
+            totalVideoWatchTime += video.totalWatchTimeSeconds
+            totalVideoCompletions += video.completionCount
+            if (video.isShort) shortsCount++ else longVideosCount++
+        }
+
+        OverallStatistics(
+            totalMusicPlays = totalMusicPlays,
+            totalListeningTimeSeconds = totalListeningTime,
+            totalMusicCompletions = totalMusicCompletions,
+            totalVideoPlays = totalVideoPlays,
+            totalVideoWatchTimeSeconds = totalVideoWatchTime,
+            totalVideoCompletions = totalVideoCompletions,
+            totalShortsCount = shortsCount,
+            totalLongVideosCount = longVideosCount
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), OverallStatistics())
+
     private val _uiState = MutableStateFlow(MusicUiState())
     val uiState: StateFlow<MusicUiState> = _uiState.asStateFlow()
 
@@ -76,14 +151,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var originalQueue: List<Song> = emptyList()
     private var queueIndex: Int = 0
     private var sleepTimerJob: Job? = null
-    private var playDurationAccumulator = 0f
+    private var songListeningJob: Job? = null
+    private var videoWatchJob: Job? = null
 
     init {
         viewModelScope.launch {
             repository.ensureInitialData()
         }
 
-        // Collect songs and initialize first song if not set
+        // Initialize first song
         viewModelScope.launch {
             repository.allSongs.collect { songs ->
                 if (songs.isNotEmpty() && _uiState.value.currentSong == null) {
@@ -97,10 +173,26 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // Initialize first video
+        viewModelScope.launch {
+            repository.allVideos.collect { videos ->
+                if (videos.isNotEmpty() && _uiState.value.currentVideo == null) {
+                    _uiState.value = _uiState.value.copy(
+                        currentVideo = videos.first()
+                    )
+                }
+            }
+        }
+
         // Collect audio engine states
         viewModelScope.launch {
             audioEngine.isPlaying.collect { isPlaying ->
                 _uiState.value = _uiState.value.copy(isPlaying = isPlaying)
+                if (isPlaying) {
+                    startListeningTracker()
+                } else {
+                    stopListeningTracker()
+                }
             }
         }
 
@@ -127,6 +219,24 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun startListeningTracker() {
+        songListeningJob?.cancel()
+        songListeningJob = viewModelScope.launch {
+            while (isActive) {
+                delay(1000)
+                val song = _uiState.value.currentSong
+                if (song != null && _uiState.value.isPlaying) {
+                    repository.addListeningTime(song.id, 1L)
+                }
+            }
+        }
+    }
+
+    private fun stopListeningTracker() {
+        songListeningJob?.cancel()
+        songListeningJob = null
+    }
+
     fun setTab(tab: NavigationTab) {
         _uiState.value = _uiState.value.copy(currentTab = tab)
     }
@@ -136,6 +246,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playSong(song: Song, contextQueue: List<Song>? = null) {
+        // Pause any active video
+        if (_uiState.value.isVideoPlaying) {
+            pauseVideo()
+        }
+
         if (contextQueue != null) {
             originalQueue = contextQueue
             playbackQueue = if (_uiState.value.isShuffle) contextQueue.shuffled() else contextQueue
@@ -154,9 +269,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         )
         audioEngine.playSong(song, 0f)
 
-        // Increment play count in database
+        // Increment play count & log history
         viewModelScope.launch {
             repository.incrementPlayCount(song.id)
+            repository.logHistory(
+                mediaId = song.id,
+                mediaType = "MUSIC",
+                title = song.title,
+                subtitle = "${song.artist} • ${song.album}",
+                durationSec = song.durationSeconds
+            )
         }
     }
 
@@ -165,6 +287,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.isPlaying) {
             audioEngine.pause()
         } else {
+            // If video was playing, pause it
+            if (_uiState.value.isVideoPlaying) {
+                pauseVideo()
+            }
             if (_uiState.value.currentPositionSec > 0f) {
                 audioEngine.resume()
             } else {
@@ -180,33 +306,28 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun skipNext() {
         if (playbackQueue.isEmpty()) return
-        when (_uiState.value.repeatMode) {
-            RepeatMode.ONE -> {
-                _uiState.value.currentSong?.let { playSong(it) }
-            }
-            else -> {
-                queueIndex = (queueIndex + 1) % playbackQueue.size
-                val nextSong = playbackQueue[queueIndex]
-                playSong(nextSong)
-            }
-        }
+        val nextIndex = (queueIndex + 1) % playbackQueue.size
+        queueIndex = nextIndex
+        playSong(playbackQueue[nextIndex])
     }
 
     fun skipPrevious() {
         if (playbackQueue.isEmpty()) return
-        if (_uiState.value.currentPositionSec > 3f) {
-            seekTo(0f)
-            return
-        }
-        queueIndex = if (queueIndex - 1 < 0) playbackQueue.size - 1 else queueIndex - 1
-        val prevSong = playbackQueue[queueIndex]
-        playSong(prevSong)
+        val prevIndex = if (queueIndex - 1 < 0) playbackQueue.size - 1 else queueIndex - 1
+        queueIndex = prevIndex
+        playSong(playbackQueue[prevIndex])
     }
 
     private fun handleTrackCompletion() {
+        val current = _uiState.value.currentSong ?: return
+        viewModelScope.launch {
+            repository.incrementSongCompletion(current.id)
+        }
+
         when (_uiState.value.repeatMode) {
             RepeatMode.ONE -> {
-                _uiState.value.currentSong?.let { playSong(it) }
+                audioEngine.seekTo(0f)
+                audioEngine.playSong(current, 0f)
             }
             RepeatMode.ALL -> {
                 skipNext()
@@ -216,7 +337,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     skipNext()
                 } else {
                     audioEngine.pause()
-                    seekTo(0f)
+                    audioEngine.seekTo(0f)
                 }
             }
         }
@@ -226,21 +347,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val newShuffle = !_uiState.value.isShuffle
         _uiState.value = _uiState.value.copy(isShuffle = newShuffle)
         val currentSong = _uiState.value.currentSong
+
         playbackQueue = if (newShuffle) {
-            originalQueue.shuffled()
+            val shuffled = originalQueue.toMutableList()
+            shuffled.remove(currentSong)
+            shuffled.shuffle()
+            if (currentSong != null) listOf(currentSong) + shuffled else shuffled
         } else {
             originalQueue
         }
-        if (currentSong != null) {
-            queueIndex = playbackQueue.indexOfFirst { it.id == currentSong.id }.coerceAtLeast(0)
-        }
+        queueIndex = playbackQueue.indexOfFirst { it.id == currentSong?.id }.coerceAtLeast(0)
     }
 
     fun toggleRepeat() {
         val nextMode = when (_uiState.value.repeatMode) {
-            RepeatMode.OFF -> RepeatMode.ALL
             RepeatMode.ALL -> RepeatMode.ONE
             RepeatMode.ONE -> RepeatMode.OFF
+            RepeatMode.OFF -> RepeatMode.ALL
         }
         _uiState.value = _uiState.value.copy(repeatMode = nextMode)
     }
@@ -264,26 +387,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         audioEngine.triggerScratchEffect()
     }
 
-    fun updateEqualizer(settings: EqualizerSettings) {
-        _uiState.value = _uiState.value.copy(equalizerSettings = settings)
-        audioEngine.updateEqualizer(settings)
-    }
-
     fun setSleepTimer(minutes: Int?) {
         sleepTimerJob?.cancel()
-        if (minutes == null || minutes <= 0) {
-            _uiState.value = _uiState.value.copy(sleepTimerMinutesLeft = null)
-            return
-        }
         _uiState.value = _uiState.value.copy(sleepTimerMinutesLeft = minutes)
-        sleepTimerJob = viewModelScope.launch {
-            var remaining = minutes
-            while (isActive && remaining > 0) {
-                delay(60000L) // 1 minute
-                remaining--
-                _uiState.value = _uiState.value.copy(sleepTimerMinutesLeft = if (remaining > 0) remaining else null)
-            }
-            if (isActive) {
+
+        if (minutes != null && minutes > 0) {
+            sleepTimerJob = viewModelScope.launch {
+                var remaining = minutes
+                while (remaining > 0) {
+                    delay(60000)
+                    remaining--
+                    _uiState.value = _uiState.value.copy(sleepTimerMinutesLeft = remaining)
+                }
                 audioEngine.pause()
                 _uiState.value = _uiState.value.copy(sleepTimerMinutesLeft = null)
             }
@@ -296,6 +411,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun toggleEqualizerDialog(show: Boolean) {
         _uiState.value = _uiState.value.copy(showEqualizerDialog = show)
+    }
+
+    fun updateEqualizer(settings: EqualizerSettings) {
+        _uiState.value = _uiState.value.copy(equalizerSettings = settings)
     }
 
     fun toggleCreatePlaylistDialog(show: Boolean) {
@@ -352,9 +471,154 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun getSongsForPlaylist(playlistId: String) = repository.getSongsForPlaylist(playlistId)
 
+    // ==================== VIDEO METHODS ====================
+
+    fun setSelectedVideoTab(tab: Int) {
+        _uiState.value = _uiState.value.copy(selectedVideoTab = tab)
+    }
+
+    fun playVideo(video: VideoItem) {
+        // Pause music playback when video plays
+        if (_uiState.value.isPlaying) {
+            audioEngine.pause()
+        }
+
+        _uiState.value = _uiState.value.copy(
+            currentVideo = video,
+            isVideoPlaying = true,
+            videoPositionSec = 0f
+        )
+
+        startVideoWatchTracker(video.id)
+
+        viewModelScope.launch {
+            repository.incrementWatchCount(video.id)
+            repository.logHistory(
+                mediaId = video.id,
+                mediaType = "VIDEO",
+                title = video.title,
+                subtitle = "${video.artist} • ${if (video.isShort) "Short" else "Long Video"}",
+                durationSec = video.durationSeconds
+            )
+        }
+    }
+
+    fun pauseVideo() {
+        _uiState.value = _uiState.value.copy(isVideoPlaying = false)
+        stopVideoWatchTracker()
+    }
+
+    fun resumeVideo() {
+        if (_uiState.value.isPlaying) {
+            audioEngine.pause()
+        }
+        _uiState.value = _uiState.value.copy(isVideoPlaying = true)
+        val video = _uiState.value.currentVideo
+        if (video != null) {
+            startVideoWatchTracker(video.id)
+        }
+    }
+
+    fun toggleVideoPlayPause() {
+        if (_uiState.value.isVideoPlaying) {
+            pauseVideo()
+        } else {
+            resumeVideo()
+        }
+    }
+
+    fun setVideoPosition(seconds: Float) {
+        _uiState.value = _uiState.value.copy(videoPositionSec = seconds)
+    }
+
+    fun onVideoCompleted(videoId: String) {
+        viewModelScope.launch {
+            repository.incrementVideoCompletion(videoId)
+        }
+    }
+
+    fun toggleVideoFavorite(video: VideoItem) {
+        viewModelScope.launch {
+            repository.toggleVideoFavorite(video.id, video.isFavorite)
+            if (_uiState.value.currentVideo?.id == video.id) {
+                _uiState.value = _uiState.value.copy(
+                    currentVideo = video.copy(isFavorite = !video.isFavorite)
+                )
+            }
+        }
+    }
+
+    private fun startVideoWatchTracker(videoId: String) {
+        videoWatchJob?.cancel()
+        videoWatchJob = viewModelScope.launch {
+            while (isActive) {
+                delay(1000)
+                if (_uiState.value.isVideoPlaying) {
+                    repository.addWatchTime(videoId, 1L)
+                    val newPos = _uiState.value.videoPositionSec + 1f
+                    _uiState.value = _uiState.value.copy(videoPositionSec = newPos)
+                    val duration = _uiState.value.currentVideo?.durationSeconds ?: 0
+                    if (duration > 0 && newPos >= duration) {
+                        onVideoCompleted(videoId)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stopVideoWatchTracker() {
+        videoWatchJob?.cancel()
+        videoWatchJob = null
+    }
+
+    fun setShortsThreshold(seconds: Int) {
+        _uiState.value = _uiState.value.copy(shortsThresholdSeconds = seconds)
+    }
+
+    fun scanLocalMedia() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                isScanningMedia = true,
+                scanStatusMessage = "Scanning device storage for music and videos..."
+            )
+
+            try {
+                val scannedAudio = mediaScanner.scanLocalAudio()
+                val scannedVideos = mediaScanner.scanLocalVideos(_uiState.value.shortsThresholdSeconds)
+
+                if (scannedAudio.isNotEmpty()) {
+                    repository.insertScannedSongs(scannedAudio)
+                }
+
+                if (scannedVideos.isNotEmpty()) {
+                    repository.insertScannedVideos(scannedVideos)
+                }
+
+                val msg = "Discovered ${scannedAudio.size} songs and ${scannedVideos.size} videos from MediaStore"
+                _uiState.value = _uiState.value.copy(
+                    isScanningMedia = false,
+                    scanStatusMessage = msg
+                )
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(
+                    isScanningMedia = false,
+                    scanStatusMessage = "Scan error: ${e.message}"
+                )
+            }
+        }
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch {
+            repository.clearHistory()
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         audioEngine.stop()
         sleepTimerJob?.cancel()
+        songListeningJob?.cancel()
+        videoWatchJob?.cancel()
     }
 }

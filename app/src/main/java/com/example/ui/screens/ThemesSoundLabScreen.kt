@@ -350,7 +350,101 @@ fun ThemesSoundLabScreen(
             }
         }
 
-        // About Music Nasir Khan Card
+        // Local Media Scanner & Shorts Settings Card
+        item {
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Tune,
+                            contentDescription = "Media Config",
+                            tint = primaryColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Local Media Discovery & Video Config",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp
+                        )
+                    }
+
+                    Text(
+                        text = "Automatically discover music tracks and video files stored on device using Android MediaStore.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Button(
+                        onClick = { viewModel.scanLocalMedia() },
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                        enabled = !uiState.isScanningMedia,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("scan_media_button")
+                    ) {
+                        Text(
+                            if (uiState.isScanningMedia) "Scanning Device Storage..." else "Scan Device Storage (Music & Videos)",
+                            color = Color.Black,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    if (uiState.scanStatusMessage != null) {
+                        Text(
+                            text = uiState.scanStatusMessage ?: "",
+                            fontSize = 12.sp,
+                            color = primaryColor,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Shorts Classification Threshold",
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                            Text(
+                                "≤ ${uiState.shortsThresholdSeconds}s",
+                                fontWeight = FontWeight.Bold,
+                                color = primaryColor,
+                                fontSize = 13.sp
+                            )
+                        }
+                        Text(
+                            "Videos with duration up to this limit are automatically classified as vertical swipe Shorts.",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Slider(
+                            value = uiState.shortsThresholdSeconds.toFloat(),
+                            onValueChange = { viewModel.setShortsThreshold(it.toInt()) },
+                            valueRange = 15f..120f,
+                            steps = 6,
+                            colors = SliderDefaults.colors(
+                                thumbColor = primaryColor,
+                                activeTrackColor = primaryColor
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // About Music for Nasir Card
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -369,13 +463,13 @@ fun ThemesSoundLabScreen(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "Music Nasir Khan Player",
+                            text = "Music for Nasir",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
                     }
                     Text(
-                        text = "Created with real-time multi-track musical PCM synthesis, spinning vinyl turntable mechanics, dynamic audio spectrum visualizers, most-played tracking, and customizable theme palettes.",
+                        text = "Complete multimedia suite featuring high-fidelity music playback, spinning turntable disc mechanics, dynamic audio spectrum visualizer, video player, vertical swipe Shorts Reels, local MediaStore scanning, and live playback statistics.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 16.sp

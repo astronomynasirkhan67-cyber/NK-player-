@@ -15,12 +15,16 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.outlined.Album
+import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.LibraryMusic
+import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -41,12 +45,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.EqualizerDialog
 import com.example.ui.components.MiniPlayerBar
 import com.example.ui.screens.LibraryPlaylistsScreen
 import com.example.ui.screens.NowPlayingScreen
+import com.example.ui.screens.StatsScreen
 import com.example.ui.screens.ThemesSoundLabScreen
+import com.example.ui.screens.VideosScreen
 import com.example.ui.theme.MusicNasirKhanTheme
 import com.example.ui.viewmodel.MusicViewModel
 import com.example.ui.viewmodel.NavigationTab
@@ -85,12 +92,12 @@ class MainActivity : ComponentActivity() {
                                         )
                                     )
                                     .navigationBarsPadding()
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 NavigationBar(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(24.dp))
+                                        .clip(RoundedCornerShape(22.dp))
                                         .border(
                                             width = 1.dp,
                                             brush = Brush.horizontalGradient(
@@ -100,26 +107,28 @@ class MainActivity : ComponentActivity() {
                                                     primaryColor.copy(alpha = 0.35f)
                                                 )
                                             ),
-                                            shape = RoundedCornerShape(24.dp)
+                                            shape = RoundedCornerShape(22.dp)
                                         )
                                         .testTag("main_navigation_bar"),
-                                    containerColor = surfaceColor.copy(alpha = 0.92f),
+                                    containerColor = surfaceColor.copy(alpha = 0.94f),
                                     contentColor = MaterialTheme.colorScheme.onSurface,
                                     tonalElevation = 8.dp
                                 ) {
+                                    // 1. Player
                                     NavigationBarItem(
                                         selected = uiState.currentTab == NavigationTab.NOW_PLAYING,
                                         onClick = { viewModel.setTab(NavigationTab.NOW_PLAYING) },
                                         icon = {
                                             Icon(
                                                 imageVector = if (uiState.currentTab == NavigationTab.NOW_PLAYING) Icons.Filled.Album else Icons.Outlined.Album,
-                                                contentDescription = "Now Playing"
+                                                contentDescription = "Player"
                                             )
                                         },
                                         label = {
                                             Text(
                                                 "Player",
-                                                fontWeight = if (uiState.currentTab == NavigationTab.NOW_PLAYING) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
+                                                fontSize = 11.sp,
+                                                fontWeight = if (uiState.currentTab == NavigationTab.NOW_PLAYING) FontWeight.Bold else FontWeight.Normal
                                             )
                                         },
                                         colors = NavigationBarItemDefaults.colors(
@@ -132,6 +141,7 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.testTag("nav_tab_player")
                                     )
 
+                                    // 2. Playlists / Library
                                     NavigationBarItem(
                                         selected = uiState.currentTab == NavigationTab.PLAYLISTS,
                                         onClick = { viewModel.setTab(NavigationTab.PLAYLISTS) },
@@ -143,8 +153,9 @@ class MainActivity : ComponentActivity() {
                                         },
                                         label = {
                                             Text(
-                                                "Playlists",
-                                                fontWeight = if (uiState.currentTab == NavigationTab.PLAYLISTS) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
+                                                "Music",
+                                                fontSize = 11.sp,
+                                                fontWeight = if (uiState.currentTab == NavigationTab.PLAYLISTS) FontWeight.Bold else FontWeight.Normal
                                             )
                                         },
                                         colors = NavigationBarItemDefaults.colors(
@@ -157,6 +168,61 @@ class MainActivity : ComponentActivity() {
                                         modifier = Modifier.testTag("nav_tab_playlists")
                                     )
 
+                                    // 3. Videos (Shorts & Long Videos)
+                                    NavigationBarItem(
+                                        selected = uiState.currentTab == NavigationTab.VIDEOS,
+                                        onClick = { viewModel.setTab(NavigationTab.VIDEOS) },
+                                        icon = {
+                                            Icon(
+                                                imageVector = if (uiState.currentTab == NavigationTab.VIDEOS) Icons.Filled.Movie else Icons.Outlined.Movie,
+                                                contentDescription = "Videos"
+                                            )
+                                        },
+                                        label = {
+                                            Text(
+                                                "Videos",
+                                                fontSize = 11.sp,
+                                                fontWeight = if (uiState.currentTab == NavigationTab.VIDEOS) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = Color.Black,
+                                            selectedTextColor = primaryColor,
+                                            indicatorColor = primaryColor,
+                                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        modifier = Modifier.testTag("nav_tab_videos")
+                                    )
+
+                                    // 4. Statistics
+                                    NavigationBarItem(
+                                        selected = uiState.currentTab == NavigationTab.STATS,
+                                        onClick = { viewModel.setTab(NavigationTab.STATS) },
+                                        icon = {
+                                            Icon(
+                                                imageVector = if (uiState.currentTab == NavigationTab.STATS) Icons.Filled.BarChart else Icons.Outlined.BarChart,
+                                                contentDescription = "Stats"
+                                            )
+                                        },
+                                        label = {
+                                            Text(
+                                                "Stats",
+                                                fontSize = 11.sp,
+                                                fontWeight = if (uiState.currentTab == NavigationTab.STATS) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        colors = NavigationBarItemDefaults.colors(
+                                            selectedIconColor = Color.Black,
+                                            selectedTextColor = primaryColor,
+                                            indicatorColor = primaryColor,
+                                            unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                        ),
+                                        modifier = Modifier.testTag("nav_tab_stats")
+                                    )
+
+                                    // 5. Themes & Lab Settings
                                     NavigationBarItem(
                                         selected = uiState.currentTab == NavigationTab.THEMES_LAB,
                                         onClick = { viewModel.setTab(NavigationTab.THEMES_LAB) },
@@ -169,7 +235,8 @@ class MainActivity : ComponentActivity() {
                                         label = {
                                             Text(
                                                 "Themes",
-                                                fontWeight = if (uiState.currentTab == NavigationTab.THEMES_LAB) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal
+                                                fontSize = 11.sp,
+                                                fontWeight = if (uiState.currentTab == NavigationTab.THEMES_LAB) FontWeight.Bold else FontWeight.Normal
                                             )
                                         },
                                         colors = NavigationBarItemDefaults.colors(
@@ -219,6 +286,18 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
 
+                                NavigationTab.VIDEOS -> {
+                                    VideosScreen(
+                                        viewModel = viewModel
+                                    )
+                                }
+
+                                NavigationTab.STATS -> {
+                                    StatsScreen(
+                                        viewModel = viewModel
+                                    )
+                                }
+
                                 NavigationTab.THEMES_LAB -> {
                                     ThemesSoundLabScreen(
                                         viewModel = viewModel
@@ -226,8 +305,12 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
 
-                            // Floating Mini Player when on Playlists or Themes tab
-                            if (uiState.currentTab != NavigationTab.NOW_PLAYING && uiState.currentSong != null) {
+                            // Floating Mini Player when not on NowPlaying or Videos screen
+                            if (uiState.currentTab != NavigationTab.NOW_PLAYING &&
+                                uiState.currentTab != NavigationTab.VIDEOS &&
+                                uiState.currentSong != null &&
+                                !uiState.isVideoPlaying
+                            ) {
                                 val currentSong = uiState.currentSong
                                 val duration = currentSong?.durationSeconds ?: 1
                                 val progress = uiState.currentPositionSec / duration.toFloat()
