@@ -28,7 +28,7 @@ data class Song(
 data class VideoItem(
     @PrimaryKey val id: String,
     val title: String,
-    val artist: String,
+    val artist: String = "Device Media",
     val uri: String,
     val durationSeconds: Int,
     val isShort: Boolean = false,

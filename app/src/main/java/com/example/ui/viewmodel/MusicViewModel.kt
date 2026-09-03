@@ -57,6 +57,7 @@ data class MusicUiState(
     val currentVideo: VideoItem? = null,
     val isVideoPlaying: Boolean = false,
     val videoPositionSec: Float = 0f,
+    val isVideoFullscreen: Boolean = false,
     val selectedVideoTab: Int = 0, // 0 = Shorts, 1 = Long Videos, 2 = Favorites
     val shortsThresholdSeconds: Int = 60,
     val isScanningMedia: Boolean = false,
@@ -544,6 +545,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         stopVideoWatchTracker()
     }
 
+    fun closeVideoPlayer() {
+        pauseVideo()
+        _uiState.value = _uiState.value.copy(
+            currentVideo = null,
+            isVideoFullscreen = false
+        )
+    }
+
     fun resumeVideo() {
         if (_uiState.value.isPlaying) {
             audioEngine.pause()
@@ -565,6 +574,36 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setVideoPosition(seconds: Float) {
         _uiState.value = _uiState.value.copy(videoPositionSec = seconds)
+    }
+
+    fun setVideoFullscreen(fullscreen: Boolean) {
+        _uiState.value = _uiState.value.copy(isVideoFullscreen = fullscreen)
+    }
+
+    fun playVideoAsAudio(video: VideoItem) {
+        // Pause and reset video playback
+        pauseVideo()
+        _uiState.value = _uiState.value.copy(
+            isVideoFullscreen = false
+        )
+        // Convert VideoItem to Song representation using the original local MediaStore URI
+        val audioSong = Song(
+            id = "video_audio_${video.id}",
+            title = video.title,
+            artist = if (video.artist.isNotBlank() && !video.artist.equals("Device Video", ignoreCase = true)) video.artist else "Music Video",
+            album = "Video Audio",
+            durationSeconds = video.durationSeconds,
+            coverResName = "img_cover_cyber",
+            genre = "Music Video",
+            bpm = 120,
+            playCount = 0,
+            isFavorite = video.isFavorite,
+            uri = video.uri,
+            albumArtUri = "",
+            lyrics = "Music Video Audio Track\nTitle: ${video.title}\nArtist: ${video.artist}"
+        )
+        playSong(audioSong)
+        setTab(NavigationTab.NOW_PLAYING)
     }
 
     fun onVideoCompleted(videoId: String) {

@@ -1,9 +1,23 @@
 package com.example.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
+import android.media.AudioManager
+import android.media.MediaPlayer
 import android.net.Uri
-import android.widget.VideoView
+import android.util.Log
+import android.view.ViewGroup
+import android.view.WindowManager
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,15 +36,29 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.Brightness6
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -47,29 +75,59 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.example.data.model.VideoItem
 import com.example.ui.viewmodel.MusicViewModel
+import kotlinx.coroutines.delay
+
+/**
+ * Information about audio or subtitle track detected in the video container.
+ */
+data class VideoTrackOption(
+    val index: Int,
+    val type: Int,
+    val label: String,
+    val language: String
+)
 
 /**
  * Long Videos Section:
  * Exclusively for full-length videos and productions (> 60 seconds).
- * Short videos (<= 60 seconds) are exclusively hosted in the pure fullscreen Shorts feed.
+ *
+ * Supports:
+ * - Fullscreen immersive player with aspect-ratio preservation (fit/contain)
+ * - Portrait & Landscape rotation support (manual toggle & sensor-based)
+ * - Complete playback controls (Seek, Play/Pause, -10s, +10s, Volume, Brightness)
+ * - Real audio/language & subtitle track selection
+ * - "Play Audio in Music Player" handoff for music videos
+ * - Smooth BackHandler navigation
  */
 @Composable
 fun VideosScreen(
@@ -89,142 +147,193 @@ fun VideosScreen(
     }
 
     var searchQuery by remember { mutableStateOf("") }
-    var selectedTab by remember { mutableStateOf(0) } // 0 = Long Videos, 1 = Favorites
+    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Long Videos, 1 = Favorites
 
-    val tabTitles = listOf("🎬 Long Videos", "❤️ Favorite Videos")
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFF0D0F14))
-    ) {
-        // Header
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 12.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "Long Videos & Productions",
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "Full-length videos over 60s (${filteredLongVideos.size})",
-                        color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 12.sp
-                    )
-                }
+    // Intercept back button when in fullscreen mode
+    BackHandler(enabled = uiState.isVideoFullscreen) {
+        viewModel.setVideoFullscreen(false)
+        activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
 
-                IconButton(
-                    onClick = { viewModel.scanLocalMedia(silent = false) },
-                    modifier = Modifier
-                        .background(Color.White.copy(alpha = 0.1f), CircleShape)
-                        .size(38.dp)
-                        .testTag("rescan_videos_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Rescan Videos",
-                        tint = Color(0xFF00E5FF)
-                    )
-                }
+    // If fullscreen is active and a video is selected, show FullscreenVideoPlayer
+    if (uiState.isVideoFullscreen && uiState.currentVideo != null) {
+        FullscreenLongVideoPlayer(
+            video = uiState.currentVideo!!,
+            isPlaying = uiState.isVideoPlaying,
+            currentPos = uiState.videoPositionSec,
+            viewModel = viewModel,
+            onExitFullscreen = {
+                viewModel.setVideoFullscreen(false)
+                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
             }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Search input
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
+        )
+    } else {
+        // Normal Catalog View
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .background(Color(0xFF0D0F14))
+        ) {
+            // Header
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .testTag("video_search_input"),
-                placeholder = {
-                    Text(
-                        "Search long videos or artists...",
-                        color = Color.White.copy(alpha = 0.4f),
-                        fontSize = 13.sp
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = Color(0xFF00E5FF)
-                    )
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = Color(0xFF00E5FF),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    cursorColor = Color(0xFF00E5FF)
-                )
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Tabs for Long Videos and Favorites
-            TabRow(
-                selectedTabIndex = selectedTab,
-                containerColor = Color.Transparent,
-                contentColor = Color(0xFF00E5FF),
-                indicator = { tabPositions ->
-                    TabRowDefaults.SecondaryIndicator(
-                        Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
-                        color = Color(0xFF00E5FF)
-                    )
-                },
-                divider = {}
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
-                tabTitles.forEachIndexed { index, title ->
-                    Tab(
-                        selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        text = {
-                            Text(
-                                title,
-                                color = if (selectedTab == index) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.6f),
-                                fontSize = 13.sp,
-                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
-                            )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Long Videos & Productions",
+                            color = Color.White,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Full-length videos over 60s (${filteredLongVideos.size})",
+                            color = Color(0xFF00E5FF),
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    Button(
+                        onClick = { viewModel.scanLocalMedia(silent = false) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B2333)),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("scan_long_videos_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Rescan",
+                            color = Color(0xFF00E5FF),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Search Bar
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = {
+                        Text(
+                            "Search long videos, concerts, music videos...",
+                            color = Color.White.copy(alpha = 0.45f),
+                            fontSize = 13.sp
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Clear",
+                                    tint = Color.White.copy(alpha = 0.6f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
-                    )
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = Color(0xFF141721),
+                        unfocusedContainerColor = Color(0xFF141721),
+                        focusedBorderColor = Color(0xFF00E5FF),
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.1f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("video_search_input")
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Navigation Tabs
+                val tabTitles = listOf("🎬 Long Videos", "❤️ Favorite Videos")
+                TabRow(
+                    selectedTabIndex = selectedTab,
+                    containerColor = Color(0xFF141721),
+                    contentColor = Color(0xFF00E5FF),
+                    indicator = { tabPositions ->
+                        TabRowDefaults.SecondaryIndicator(
+                            modifier = Modifier.tabIndicatorOffset(tabPositions[selectedTab]),
+                            color = Color(0xFF00E5FF),
+                            height = 3.dp
+                        )
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                ) {
+                    tabTitles.forEachIndexed { index, title ->
+                        Tab(
+                            selected = selectedTab == index,
+                            onClick = { selectedTab = index },
+                            text = {
+                                Text(
+                                    text = title,
+                                    color = if (selectedTab == index) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.6f),
+                                    fontSize = 13.sp,
+                                    fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        )
+                    }
                 }
             }
-        }
 
-        // Active filtered list
-        val baseList = if (selectedTab == 0) filteredLongVideos else filteredFavoriteLongVideos
-        val activeList = remember(baseList, searchQuery) {
-            if (searchQuery.isBlank()) baseList
-            else baseList.filter {
-                it.title.contains(searchQuery, ignoreCase = true) ||
-                        it.artist.contains(searchQuery, ignoreCase = true)
+            // Active filtered list
+            val baseList = if (selectedTab == 0) filteredLongVideos else filteredFavoriteLongVideos
+            val activeList = remember(baseList, searchQuery) {
+                if (searchQuery.isBlank()) baseList
+                else baseList.filter {
+                    it.title.contains(searchQuery, ignoreCase = true) ||
+                            it.artist.contains(searchQuery, ignoreCase = true)
+                }
             }
-        }
 
-        LongVideosCatalogView(
-            videos = activeList,
-            viewModel = viewModel,
-            currentVideo = uiState.currentVideo,
-            isVideoPlaying = uiState.isVideoPlaying,
-            videoPositionSec = uiState.videoPositionSec,
-            isFavoriteTab = selectedTab == 1
-        )
+            LongVideosCatalogView(
+                videos = activeList,
+                viewModel = viewModel,
+                currentVideo = uiState.currentVideo,
+                isVideoPlaying = uiState.isVideoPlaying,
+                videoPositionSec = uiState.videoPositionSec,
+                isFavoriteTab = selectedTab == 1
+            )
+        }
     }
 }
 
+/**
+ * Catalog list showing the active player card (if a video is selected) and the video cards.
+ */
 @Composable
 fun LongVideosCatalogView(
     videos: List<VideoItem>,
@@ -242,7 +351,7 @@ fun LongVideosCatalogView(
     ) {
         // Active Player Card if a long video is selected
         if (currentVideo != null && currentVideo.durationSeconds > 60) {
-            item {
+            item(key = "active_player_card") {
                 ActiveLongVideoPlayerCard(
                     video = currentVideo,
                     isPlaying = isVideoPlaying,
@@ -298,7 +407,7 @@ fun LongVideosCatalogView(
                             },
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 12.sp,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            textAlign = TextAlign.Center
                         )
                         if (!isFavoriteTab) {
                             Spacer(modifier = Modifier.height(4.dp))
@@ -316,18 +425,23 @@ fun LongVideosCatalogView(
                 }
             }
         } else {
-            items(videos) { video ->
+            items(videos, key = { it.id }) { video ->
                 VideoListItemCard(
                     video = video,
                     isSelected = currentVideo?.id == video.id,
                     onClick = { viewModel.playVideo(video) },
-                    onFavorite = { viewModel.toggleVideoFavorite(video) }
+                    onFavorite = { viewModel.toggleVideoFavorite(video) },
+                    onPlayAsAudio = { viewModel.playVideoAsAudio(video) }
                 )
             }
         }
     }
 }
 
+/**
+ * Modern In-Card Long Video Player with aspect-ratio preservation, fullscreen button,
+ * orientation toggle, volume/brightness/audio controls, and "Play Audio in Music Player".
+ */
 @Composable
 fun ActiveLongVideoPlayerCard(
     video: VideoItem,
@@ -335,6 +449,21 @@ fun ActiveLongVideoPlayerCard(
     currentPos: Float,
     viewModel: MusicViewModel
 ) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    var showVolumeDialog by remember { mutableStateOf(false) }
+    var showBrightnessDialog by remember { mutableStateOf(false) }
+    var showAudioTrackDialog by remember { mutableStateOf(false) }
+
+    var detectedAudioTracks by remember { mutableStateOf<List<VideoTrackOption>>(emptyList()) }
+    var detectedSubtitleTracks by remember { mutableStateOf<List<VideoTrackOption>>(emptyList()) }
+    var selectedAudioTrackIndex by remember { mutableIntStateOf(-1) }
+    var mediaPlayerRef by remember { mutableStateOf<MediaPlayer?>(null) }
+    var videoViewRef by remember { mutableStateOf<AspectFitVideoView?>(null) }
+
     Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF141721)),
@@ -342,70 +471,151 @@ fun ActiveLongVideoPlayerCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Video Player Window
+            // Video Player View Container
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 9f)
                     .background(Color.Black)
+                    .testTag("active_video_container"),
+                contentAlignment = Alignment.Center
             ) {
                 if (video.uri.isNotBlank()) {
                     AndroidView(
-                        factory = { context ->
-                            VideoView(context).apply {
+                        factory = { ctx ->
+                            AspectFitVideoView(ctx).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT
+                                )
                                 setVideoURI(Uri.parse(video.uri))
                                 setOnPreparedListener { mp ->
+                                    mediaPlayerRef = mp
+                                    mp.setOnVideoSizeChangedListener { _, w, h ->
+                                        updateVideoSize(w, h)
+                                    }
+                                    updateVideoSize(mp.videoWidth, mp.videoHeight)
+                                    // Detect audio and subtitle tracks
+                                    val (aTracks, sTracks) = inspectMediaTracks(mp)
+                                    detectedAudioTracks = aTracks
+                                    detectedSubtitleTracks = sTracks
+
                                     if (isPlaying) start()
                                 }
                                 setOnErrorListener { _, _, _ -> true }
                                 setOnCompletionListener {
                                     viewModel.onVideoCompleted(video.id)
                                 }
+                                videoViewRef = this
                             }
                         },
-                        update = { videoView ->
+                        update = { view ->
+                            videoViewRef = view
                             if (isPlaying) {
-                                if (!videoView.isPlaying) videoView.start()
+                                if (!view.isPlaying) view.start()
                             } else {
-                                if (videoView.isPlaying) videoView.pause()
+                                if (view.isPlaying) view.pause()
                             }
                         },
                         modifier = Modifier.fillMaxSize()
                     )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Movie,
-                            contentDescription = "Video",
-                            tint = Color(0xFF00E5FF),
-                            modifier = Modifier.size(48.dp)
-                        )
-                    }
                 }
 
-                // Resolution Badge
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = Color.Black.copy(alpha = 0.7f),
+                // Top Overlay: Close, Rotation, and Fullscreen
+                Row(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(10.dp)
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                        .padding(8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        video.resolution,
-                        color = Color(0xFF00E5FF),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                    )
+                    // Resolution Badge
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.Black.copy(alpha = 0.7f)
+                    ) {
+                        Text(
+                            text = video.resolution,
+                            color = Color(0xFF00E5FF),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // Rotation toggle
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.65f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    activity?.let { act ->
+                                        act.requestedOrientation = if (isLandscape) {
+                                            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                        } else {
+                                            ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.testTag("card_rotation_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ScreenRotation,
+                                    contentDescription = "Rotate Screen",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        // Fullscreen button
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.65f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            IconButton(
+                                onClick = { viewModel.setVideoFullscreen(true) },
+                                modifier = Modifier.testTag("enter_fullscreen_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Fullscreen,
+                                    contentDescription = "Enter Fullscreen",
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        // Dismiss/Close player card
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Black.copy(alpha = 0.65f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            IconButton(
+                                onClick = { viewModel.closeVideoPlayer() },
+                                modifier = Modifier.testTag("close_player_card_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close Player",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            // Controls & Information
-            Column(modifier = Modifier.padding(16.dp)) {
+            // Controls & Information Area
+            Column(modifier = Modifier.padding(14.dp)) {
+                // Title and Favorite Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -415,7 +625,7 @@ fun ActiveLongVideoPlayerCard(
                         Text(
                             text = video.title,
                             color = Color.White,
-                            fontSize = 16.sp,
+                            fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -423,7 +633,7 @@ fun ActiveLongVideoPlayerCard(
                         Text(
                             text = video.artist,
                             color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.sp
+                            fontSize = 11.sp
                         )
                     }
 
@@ -432,22 +642,23 @@ fun ActiveLongVideoPlayerCard(
                         modifier = Modifier.testTag("active_video_fav_btn")
                     ) {
                         Icon(
-                            if (video.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            imageVector = if (video.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = "Favorite",
                             tint = if (video.isFavorite) Color(0xFFFF2A6D) else Color.White
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Progress scrubber
+                // Progress scrubber slider
                 val duration = video.durationSeconds.toFloat().coerceAtLeast(1f)
                 val safePos = currentPos.coerceIn(0f, duration)
 
                 Slider(
                     value = safePos,
-                    onValueChange = { viewModel.setVideoPosition(it) },
+                    onValueChange = {
+                        viewModel.setVideoPosition(it)
+                        videoViewRef?.seekTo((it * 1000).toInt())
+                    },
                     valueRange = 0f..duration,
                     colors = SliderDefaults.colors(
                         thumbColor = Color(0xFF00E5FF),
@@ -473,9 +684,9 @@ fun ActiveLongVideoPlayerCard(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Control Buttons
+                // Control Buttons Row (-10s, Play/Pause, +10s)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
@@ -485,21 +696,23 @@ fun ActiveLongVideoPlayerCard(
                         onClick = {
                             val newPos = (currentPos - 10f).coerceAtLeast(0f)
                             viewModel.setVideoPosition(newPos)
+                            videoViewRef?.seekTo((newPos * 1000).toInt())
                         }
                     ) {
                         Icon(
                             Icons.Default.FastRewind,
                             contentDescription = "Rewind 10s",
-                            tint = Color.White
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(20.dp))
 
                     IconButton(
                         onClick = { viewModel.toggleVideoPlayPause() },
                         modifier = Modifier
-                            .size(54.dp)
+                            .size(52.dp)
                             .background(Color(0xFF00E5FF), CircleShape)
                             .testTag("video_play_pause_button")
                     ) {
@@ -507,48 +720,929 @@ fun ActiveLongVideoPlayerCard(
                             if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                             contentDescription = "Play/Pause",
                             tint = Color.Black,
-                            modifier = Modifier.size(30.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(16.dp))
+                    Spacer(modifier = Modifier.width(20.dp))
 
                     IconButton(
                         onClick = {
                             val newPos = (currentPos + 10f).coerceAtMost(duration)
                             viewModel.setVideoPosition(newPos)
+                            videoViewRef?.seekTo((newPos * 1000).toInt())
                         }
                     ) {
                         Icon(
                             Icons.Default.FastForward,
                             contentDescription = "Forward 10s",
-                            tint = Color.White
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Stats badges
+                // Modern Action Bar: Listen in Music Player, Volume, Brightness, Audio Tracks
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceAround
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    StatsPill(label = "Views", value = "${video.playCount}")
-                    StatsPill(label = "Watch Time", value = formatSeconds(video.totalWatchTimeSeconds.toInt()))
-                    StatsPill(label = "Completed", value = "${video.completionCount}x")
+                    // Play Audio in Music Player Button
+                    Button(
+                        onClick = { viewModel.playVideoAsAudio(video) },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B2A3D)),
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.testTag("card_play_audio_btn")
+                    ) {
+                        Icon(
+                            Icons.Default.MusicNote,
+                            contentDescription = null,
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Listen Audio",
+                            color = Color(0xFF00E5FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // Volume Dialog Trigger
+                        IconButton(onClick = { showVolumeDialog = true }) {
+                            Icon(
+                                Icons.Default.VolumeUp,
+                                contentDescription = "Volume",
+                                tint = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // Brightness Dialog Trigger
+                        IconButton(onClick = { showBrightnessDialog = true }) {
+                            Icon(
+                                Icons.Default.Brightness6,
+                                contentDescription = "Brightness",
+                                tint = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // Audio Track Dialog Trigger
+                        IconButton(onClick = { showAudioTrackDialog = true }) {
+                            Icon(
+                                Icons.Default.Audiotrack,
+                                contentDescription = "Audio Tracks",
+                                tint = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        // Fullscreen trigger
+                        IconButton(onClick = { viewModel.setVideoFullscreen(true) }) {
+                            Icon(
+                                Icons.Default.Fullscreen,
+                                contentDescription = "Fullscreen",
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
                 }
             }
         }
     }
+
+    // Volume Dialog
+    if (showVolumeDialog) {
+        PlayerVolumeDialog(
+            onDismiss = { showVolumeDialog = false }
+        )
+    }
+
+    // Brightness Dialog
+    if (showBrightnessDialog) {
+        PlayerBrightnessDialog(
+            activity = activity,
+            onDismiss = { showBrightnessDialog = false }
+        )
+    }
+
+    // Audio & Subtitle Track Dialog
+    if (showAudioTrackDialog) {
+        AudioSubtitleTrackDialog(
+            audioTracks = detectedAudioTracks,
+            subtitleTracks = detectedSubtitleTracks,
+            selectedAudioTrackIndex = selectedAudioTrackIndex,
+            onSelectAudioTrack = { trackIndex ->
+                try {
+                    mediaPlayerRef?.selectTrack(trackIndex)
+                    selectedAudioTrackIndex = trackIndex
+                } catch (e: Exception) {
+                    Log.w("VideoPlayer", "Could not select track $trackIndex", e)
+                }
+            },
+            onDismiss = { showAudioTrackDialog = false }
+        )
+    }
 }
 
+/**
+ * Complete Fullscreen Immersive Long Video Player:
+ * - Edge-to-edge black background
+ * - Aspect-fit preservation (fit/contain, uncropped, unstretched)
+ * - Orientation toggle (Portrait / Landscape)
+ * - Auto-hiding overlay controls with tap-to-toggle
+ * - Volume, Brightness, Audio track selection, and Music Player handoff
+ */
+@Composable
+fun FullscreenLongVideoPlayer(
+    video: VideoItem,
+    isPlaying: Boolean,
+    currentPos: Float,
+    viewModel: MusicViewModel,
+    onExitFullscreen: () -> Unit
+) {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
+    var areControlsVisible by remember { mutableStateOf(true) }
+    var lastInteractionTime by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    var showVolumeDialog by remember { mutableStateOf(false) }
+    var showBrightnessDialog by remember { mutableStateOf(false) }
+    var showAudioTrackDialog by remember { mutableStateOf(false) }
+
+    var detectedAudioTracks by remember { mutableStateOf<List<VideoTrackOption>>(emptyList()) }
+    var detectedSubtitleTracks by remember { mutableStateOf<List<VideoTrackOption>>(emptyList()) }
+    var selectedAudioTrackIndex by remember { mutableIntStateOf(-1) }
+    var mediaPlayerRef by remember { mutableStateOf<MediaPlayer?>(null) }
+    var videoViewRef by remember { mutableStateOf<AspectFitVideoView?>(null) }
+
+    // Auto-hide controls after 3.5 seconds of playback
+    LaunchedEffect(areControlsVisible, lastInteractionTime, isPlaying) {
+        if (areControlsVisible && isPlaying) {
+            delay(3500)
+            areControlsVisible = false
+        }
+    }
+
+    // Enable transient immersive system bars
+    LaunchedEffect(Unit) {
+        activity?.window?.let { win ->
+            val insetsController = WindowCompat.getInsetsController(win, win.decorView)
+            insetsController.hide(WindowInsetsCompat.Type.systemBars())
+            insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    // Restore system bars and orientation on exit
+    DisposableEffect(Unit) {
+        onDispose {
+            activity?.let { act ->
+                val insetsController = WindowCompat.getInsetsController(act.window, act.window.decorView)
+                insetsController.show(WindowInsetsCompat.Type.systemBars())
+                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) {
+                areControlsVisible = !areControlsVisible
+                lastInteractionTime = System.currentTimeMillis()
+            }
+            .testTag("fullscreen_video_player"),
+        contentAlignment = Alignment.Center
+    ) {
+        // Video View with aspect-fit contain behavior
+        if (video.uri.isNotBlank()) {
+            AndroidView(
+                factory = { ctx ->
+                    AspectFitVideoView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                        setVideoURI(Uri.parse(video.uri))
+                        setOnPreparedListener { mp ->
+                            mediaPlayerRef = mp
+                            mp.setOnVideoSizeChangedListener { _, w, h ->
+                                updateVideoSize(w, h)
+                            }
+                            updateVideoSize(mp.videoWidth, mp.videoHeight)
+                            val (aTracks, sTracks) = inspectMediaTracks(mp)
+                            detectedAudioTracks = aTracks
+                            detectedSubtitleTracks = sTracks
+
+                            seekTo((currentPos * 1000).toInt())
+                            if (isPlaying) start()
+                        }
+                        setOnErrorListener { _, _, _ -> true }
+                        setOnCompletionListener {
+                            viewModel.onVideoCompleted(video.id)
+                        }
+                        videoViewRef = this
+                    }
+                },
+                update = { view ->
+                    videoViewRef = view
+                    if (isPlaying) {
+                        if (!view.isPlaying) view.start()
+                    } else {
+                        if (view.isPlaying) view.pause()
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Overlay Controls
+        AnimatedVisibility(
+            visible = areControlsVisible,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.45f))
+            ) {
+                // Top Action Bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.TopCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)
+                            )
+                        )
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                onExitFullscreen()
+                            },
+                            modifier = Modifier.testTag("exit_fullscreen_button")
+                        ) {
+                            Icon(
+                                Icons.Default.ArrowBack,
+                                contentDescription = "Exit Fullscreen",
+                                tint = Color.White
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Column {
+                            Text(
+                                text = video.title,
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${video.artist} • ${video.resolution}",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Play Audio in Music Player Handoff
+                        Button(
+                            onClick = {
+                                onExitFullscreen()
+                                viewModel.playVideoAsAudio(video)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E5FF)),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("fullscreen_play_audio_btn")
+                        ) {
+                            Icon(
+                                Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "Listen in Music Player",
+                                color = Color.Black,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        // Orientation toggle button
+                        IconButton(
+                            onClick = {
+                                lastInteractionTime = System.currentTimeMillis()
+                                activity?.let { act ->
+                                    act.requestedOrientation = if (isLandscape) {
+                                        ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                                    } else {
+                                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                                    }
+                                }
+                            },
+                            modifier = Modifier.testTag("fullscreen_rotation_btn")
+                        ) {
+                            Icon(
+                                Icons.Default.ScreenRotation,
+                                contentDescription = "Toggle Orientation",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
+
+                // Center Play/Pause & Seek Controls
+                Row(
+                    modifier = Modifier.align(Alignment.Center),
+                    horizontalArrangement = Arrangement.spacedBy(28.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(
+                        onClick = {
+                            lastInteractionTime = System.currentTimeMillis()
+                            val newPos = (currentPos - 10f).coerceAtLeast(0f)
+                            viewModel.setVideoPosition(newPos)
+                            videoViewRef?.seekTo((newPos * 1000).toInt())
+                        },
+                        modifier = Modifier
+                            .size(52.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            .testTag("fullscreen_rewind_btn")
+                    ) {
+                        Icon(
+                            Icons.Default.FastRewind,
+                            contentDescription = "Rewind 10s",
+                            tint = Color.White,
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            lastInteractionTime = System.currentTimeMillis()
+                            viewModel.toggleVideoPlayPause()
+                        },
+                        modifier = Modifier
+                            .size(68.dp)
+                            .background(Color(0xFF00E5FF), CircleShape)
+                            .testTag("fullscreen_play_pause_btn")
+                    ) {
+                        Icon(
+                            if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = "Play/Pause",
+                            tint = Color.Black,
+                            modifier = Modifier.size(38.dp)
+                        )
+                    }
+
+                    IconButton(
+                        onClick = {
+                            lastInteractionTime = System.currentTimeMillis()
+                            val duration = video.durationSeconds.toFloat().coerceAtLeast(1f)
+                            val newPos = (currentPos + 10f).coerceAtMost(duration)
+                            viewModel.setVideoPosition(newPos)
+                            videoViewRef?.seekTo((newPos * 1000).toInt())
+                        },
+                        modifier = Modifier
+                            .size(52.dp)
+                            .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                            .testTag("fullscreen_forward_btn")
+                    ) {
+                        Icon(
+                            Icons.Default.FastForward,
+                            contentDescription = "Forward 10s",
+                            tint = Color.White,
+                            modifier = Modifier.size(30.dp)
+                        )
+                    }
+                }
+
+                // Bottom Control Bar
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))
+                            )
+                        )
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    val duration = video.durationSeconds.toFloat().coerceAtLeast(1f)
+                    val safePos = currentPos.coerceIn(0f, duration)
+
+                    // Seek Slider
+                    Slider(
+                        value = safePos,
+                        onValueChange = {
+                            lastInteractionTime = System.currentTimeMillis()
+                            viewModel.setVideoPosition(it)
+                            videoViewRef?.seekTo((it * 1000).toInt())
+                        },
+                        valueRange = 0f..duration,
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color(0xFF00E5FF),
+                            activeTrackColor = Color(0xFF00E5FF),
+                            inactiveTrackColor = Color.White.copy(alpha = 0.3f)
+                        ),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Current time / Total time
+                        Text(
+                            text = "${formatSeconds(safePos.toInt())} / ${formatSeconds(video.durationSeconds)}",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        // Quick toolbar
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Volume
+                            IconButton(
+                                onClick = {
+                                    lastInteractionTime = System.currentTimeMillis()
+                                    showVolumeDialog = true
+                                },
+                                modifier = Modifier.testTag("fullscreen_volume_btn")
+                            ) {
+                                Icon(
+                                    Icons.Default.VolumeUp,
+                                    contentDescription = "Volume",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            // Brightness
+                            IconButton(
+                                onClick = {
+                                    lastInteractionTime = System.currentTimeMillis()
+                                    showBrightnessDialog = true
+                                },
+                                modifier = Modifier.testTag("fullscreen_brightness_btn")
+                            ) {
+                                Icon(
+                                    Icons.Default.Brightness6,
+                                    contentDescription = "Brightness",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            // Audio tracks
+                            IconButton(
+                                onClick = {
+                                    lastInteractionTime = System.currentTimeMillis()
+                                    showAudioTrackDialog = true
+                                },
+                                modifier = Modifier.testTag("fullscreen_audio_track_btn")
+                            ) {
+                                Icon(
+                                    Icons.Default.Audiotrack,
+                                    contentDescription = "Audio Tracks",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            // Exit Fullscreen Button
+                            IconButton(
+                                onClick = { onExitFullscreen() },
+                                modifier = Modifier.testTag("fullscreen_toggle_btn")
+                            ) {
+                                Icon(
+                                    Icons.Default.FullscreenExit,
+                                    contentDescription = "Exit Fullscreen",
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Volume Dialog
+    if (showVolumeDialog) {
+        PlayerVolumeDialog(
+            onDismiss = {
+                lastInteractionTime = System.currentTimeMillis()
+                showVolumeDialog = false
+            }
+        )
+    }
+
+    // Brightness Dialog
+    if (showBrightnessDialog) {
+        PlayerBrightnessDialog(
+            activity = activity,
+            onDismiss = {
+                lastInteractionTime = System.currentTimeMillis()
+                showBrightnessDialog = false
+            }
+        )
+    }
+
+    // Audio & Subtitle Track Dialog
+    if (showAudioTrackDialog) {
+        AudioSubtitleTrackDialog(
+            audioTracks = detectedAudioTracks,
+            subtitleTracks = detectedSubtitleTracks,
+            selectedAudioTrackIndex = selectedAudioTrackIndex,
+            onSelectAudioTrack = { trackIndex ->
+                try {
+                    mediaPlayerRef?.selectTrack(trackIndex)
+                    selectedAudioTrackIndex = trackIndex
+                } catch (e: Exception) {
+                    Log.w("VideoPlayer", "Could not select track $trackIndex", e)
+                }
+            },
+            onDismiss = {
+                lastInteractionTime = System.currentTimeMillis()
+                showAudioTrackDialog = false
+            }
+        )
+    }
+}
+
+/**
+ * Volume Dialog for adjusting Android AudioManager STREAM_MUSIC volume.
+ */
+@Composable
+fun PlayerVolumeDialog(
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val audioManager = remember(context) {
+        context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    }
+
+    val maxVolume = remember {
+        audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
+    }
+    var currentVolume by remember {
+        mutableIntStateOf(audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 7)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1B2333),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (currentVolume == 0) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                    contentDescription = null,
+                    tint = Color(0xFF00E5FF),
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Volume Level", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = if (currentVolume == 0) "Muted" else "$currentVolume / $maxVolume",
+                    color = Color(0xFF00E5FF),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Slider(
+                    value = currentVolume.toFloat(),
+                    onValueChange = {
+                        val newVol = it.toInt().coerceIn(0, maxVolume)
+                        currentVolume = newVol
+                        audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
+                    },
+                    valueRange = 0f..maxVolume.toFloat(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFF00E5FF),
+                        activeTrackColor = Color(0xFF00E5FF),
+                        inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    TextButton(
+                        onClick = {
+                            if (currentVolume > 0) {
+                                currentVolume = 0
+                                audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+                            } else {
+                                val restored = (maxVolume / 2).coerceAtLeast(1)
+                                currentVolume = restored
+                                audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, restored, 0)
+                            }
+                        }
+                    ) {
+                        Text(if (currentVolume > 0) "Mute" else "Unmute", color = Color(0xFFFF5252))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+            }
+        }
+    )
+}
+
+/**
+ * Brightness Dialog for adjusting Window screenBrightness.
+ */
+@Composable
+fun PlayerBrightnessDialog(
+    activity: Activity?,
+    onDismiss: () -> Unit
+) {
+    var brightness by remember {
+        val current = activity?.window?.attributes?.screenBrightness ?: 0.75f
+        mutableFloatStateOf(if (current < 0f) 0.75f else current)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1B2333),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Brightness6,
+                    contentDescription = null,
+                    tint = Color(0xFF00E5FF),
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Screen Brightness", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "${(brightness * 100).toInt()}%",
+                    color = Color(0xFF00E5FF),
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                Slider(
+                    value = brightness,
+                    onValueChange = {
+                        val clamped = it.coerceIn(0.05f, 1.0f)
+                        brightness = clamped
+                        activity?.window?.let { win ->
+                            val lp = win.attributes
+                            lp.screenBrightness = clamped
+                            win.attributes = lp
+                        }
+                    },
+                    valueRange = 0.05f..1.0f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = Color(0xFF00E5FF),
+                        activeTrackColor = Color(0xFF00E5FF),
+                        inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+            }
+        }
+    )
+}
+
+/**
+ * Real Audio Track and Subtitle Track Selection Dialog.
+ * Only shows actual tracks that exist in the video container.
+ */
+@Composable
+fun AudioSubtitleTrackDialog(
+    audioTracks: List<VideoTrackOption>,
+    subtitleTracks: List<VideoTrackOption>,
+    selectedAudioTrackIndex: Int,
+    onSelectAudioTrack: (Int) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF1B2333),
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Audiotrack,
+                    contentDescription = null,
+                    tint = Color(0xFF00E5FF),
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Audio & Language Tracks", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(
+                    text = "Audio Tracks:",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+
+                if (audioTracks.isEmpty() || audioTracks.size == 1) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF222B3D),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (audioTracks.size == 1) audioTracks.first().label else "Default Device Stereo Audio (Active)",
+                                color = Color.White,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
+                } else {
+                    audioTracks.forEach { track ->
+                        val isSelected = selectedAudioTrackIndex == track.index
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.15f) else Color(0xFF222B3D),
+                            border = if (isSelected) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF)) else null,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSelectAudioTrack(track.index) }
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isSelected) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                }
+                                Text(
+                                    text = track.label,
+                                    color = if (isSelected) Color(0xFF00E5FF) else Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Subtitles / Captions:",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+
+                if (subtitleTracks.isEmpty()) {
+                    Text(
+                        text = "No subtitle or closed-caption tracks found in this video file.",
+                        color = Color.White.copy(alpha = 0.5f),
+                        fontSize = 12.sp
+                    )
+                } else {
+                    subtitleTracks.forEach { sub ->
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = Color(0xFF222B3D),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Subtitles, contentDescription = null, tint = Color(0xFF00E5FF), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(sub.label, color = Color.White, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+            }
+        }
+    )
+}
+
+/**
+ * Inspects MediaPlayer container for real Audio and Subtitle tracks.
+ */
+private fun inspectMediaTracks(mp: MediaPlayer): Pair<List<VideoTrackOption>, List<VideoTrackOption>> {
+    val aTracks = mutableListOf<VideoTrackOption>()
+    val sTracks = mutableListOf<VideoTrackOption>()
+    try {
+        val trackInfos = mp.trackInfo
+        trackInfos.forEachIndexed { idx, info ->
+            if (info.trackType == MediaPlayer.TrackInfo.MEDIA_TRACK_TYPE_AUDIO) {
+                val lang = if (!info.language.isNullOrBlank() && info.language != "und") info.language else "Track ${aTracks.size + 1}"
+                aTracks.add(
+                    VideoTrackOption(
+                        index = idx,
+                        type = info.trackType,
+                        label = "Audio: $lang",
+                        language = lang
+                    )
+                )
+            } else if (info.trackType == MediaPlayer.TrackInfo.MEDIA_TRACK_TYPE_SUBTITLE ||
+                info.trackType == MediaPlayer.TrackInfo.MEDIA_TRACK_TYPE_TIMEDTEXT
+            ) {
+                val lang = if (!info.language.isNullOrBlank() && info.language != "und") info.language else "Track ${sTracks.size + 1}"
+                sTracks.add(
+                    VideoTrackOption(
+                        index = idx,
+                        type = info.trackType,
+                        label = "Subtitle: $lang",
+                        language = lang
+                    )
+                )
+            }
+        }
+    } catch (e: Exception) {
+        Log.w("VideoPlayer", "Error inspecting media tracks", e)
+    }
+    return Pair(aTracks, sTracks)
+}
+
+/**
+ * Video list item card with "Listen Audio" button and favorite button.
+ */
 @Composable
 fun VideoListItemCard(
     video: VideoItem,
     isSelected: Boolean,
     onClick: () -> Unit,
-    onFavorite: () -> Unit
+    onFavorite: () -> Unit,
+    onPlayAsAudio: () -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(14.dp),
@@ -613,13 +1707,30 @@ fun VideoListItemCard(
                 Spacer(modifier = Modifier.height(3.dp))
 
                 Text(
-                    text = "${video.artist} • ${video.playCount} views • ${formatSeconds(video.totalWatchTimeSeconds.toInt())} watched",
+                    text = "${video.artist} • ${video.playCount} views",
                     color = Color.White.copy(alpha = 0.6f),
                     fontSize = 11.sp
                 )
             }
 
-            IconButton(onClick = onFavorite) {
+            // Quick Play Audio in Music Player Button
+            IconButton(
+                onClick = onPlayAsAudio,
+                modifier = Modifier.testTag("list_play_audio_${video.id}")
+            ) {
+                Icon(
+                    Icons.Default.MusicNote,
+                    contentDescription = "Listen Audio in Music Player",
+                    tint = Color(0xFF00E5FF),
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
+            // Favorite Button
+            IconButton(
+                onClick = onFavorite,
+                modifier = Modifier.testTag("list_fav_${video.id}")
+            ) {
                 Icon(
                     if (video.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = "Favorite",
@@ -631,33 +1742,22 @@ fun VideoListItemCard(
     }
 }
 
-@Composable
-fun StatsPill(label: String, value: String) {
-    Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = Color.White.copy(alpha = 0.06f)
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                value,
-                color = Color(0xFF00E5FF),
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                label,
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 10.sp
-            )
-        }
+private fun formatSeconds(seconds: Int): String {
+    val h = seconds / 3600
+    val m = (seconds % 3600) / 60
+    val s = seconds % 60
+    return if (h > 0) {
+        String.format("%d:%02d:%02d", h, m, s)
+    } else {
+        String.format("%02d:%02d", m, s)
     }
 }
 
-private fun formatSeconds(seconds: Int): String {
-    val m = seconds / 60
-    val s = seconds % 60
-    return String.format("%02d:%02d", m, s)
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
 }

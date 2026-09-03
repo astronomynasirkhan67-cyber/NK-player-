@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -132,6 +133,12 @@ class MainActivity : ComponentActivity() {
             }
 
             MusicNasirKhanTheme(appTheme = uiState.currentTheme) {
+                val isImmersive = uiState.currentTab == NavigationTab.SHORTS || (uiState.currentTab == NavigationTab.VIDEOS && uiState.isVideoFullscreen)
+
+                BackHandler(enabled = uiState.isVideoFullscreen) {
+                    viewModel.setVideoFullscreen(false)
+                }
+
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -139,44 +146,45 @@ class MainActivity : ComponentActivity() {
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                         bottomBar = {
-                            val primaryColor = Color(uiState.currentTheme.primaryHex)
-                            val surfaceColor = MaterialTheme.colorScheme.surface
+                            if (!isImmersive) {
+                                val primaryColor = Color(uiState.currentTheme.primaryHex)
+                                val surfaceColor = MaterialTheme.colorScheme.surface
 
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(
-                                        Brush.verticalGradient(
-                                            listOf(
-                                                Color.Transparent,
-                                                Color(uiState.currentTheme.backgroundHex).copy(alpha = 0.95f),
-                                                Color(uiState.currentTheme.backgroundHex)
-                                            )
-                                        )
-                                    )
-                                    .navigationBarsPadding()
-                                    .padding(horizontal = 6.dp, vertical = 4.dp)
-                            ) {
-                                NavigationBar(
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(22.dp))
-                                        .border(
-                                            width = 1.dp,
-                                            brush = Brush.horizontalGradient(
+                                        .background(
+                                            Brush.verticalGradient(
                                                 listOf(
-                                                    primaryColor.copy(alpha = 0.35f),
-                                                    Color(uiState.currentTheme.secondaryHex).copy(alpha = 0.2f),
-                                                    primaryColor.copy(alpha = 0.35f)
+                                                    Color.Transparent,
+                                                    Color(uiState.currentTheme.backgroundHex).copy(alpha = 0.95f),
+                                                    Color(uiState.currentTheme.backgroundHex)
                                                 )
-                                            ),
-                                            shape = RoundedCornerShape(22.dp)
+                                            )
                                         )
-                                        .testTag("main_navigation_bar"),
-                                    containerColor = surfaceColor.copy(alpha = 0.94f),
-                                    contentColor = MaterialTheme.colorScheme.onSurface,
-                                    tonalElevation = 8.dp
+                                        .navigationBarsPadding()
+                                        .padding(horizontal = 6.dp, vertical = 4.dp)
                                 ) {
+                                    NavigationBar(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(22.dp))
+                                            .border(
+                                                width = 1.dp,
+                                                brush = Brush.horizontalGradient(
+                                                    listOf(
+                                                        primaryColor.copy(alpha = 0.35f),
+                                                        Color(uiState.currentTheme.secondaryHex).copy(alpha = 0.2f),
+                                                        primaryColor.copy(alpha = 0.35f)
+                                                    )
+                                                ),
+                                                shape = RoundedCornerShape(22.dp)
+                                            )
+                                            .testTag("main_navigation_bar"),
+                                        containerColor = surfaceColor.copy(alpha = 0.94f),
+                                        contentColor = MaterialTheme.colorScheme.onSurface,
+                                        tonalElevation = 8.dp
+                                    ) {
                                     // 1. Player
                                     NavigationBarItem(
                                         selected = uiState.currentTab == NavigationTab.NOW_PLAYING,
@@ -341,18 +349,17 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
+                    }
                     ) { innerPadding ->
-                        val isShorts = uiState.currentTab == NavigationTab.SHORTS
-
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(
-                                    top = if (isShorts) 0.dp else innerPadding.calculateTopPadding(),
-                                    bottom = innerPadding.calculateBottomPadding()
+                                    top = if (isImmersive) 0.dp else innerPadding.calculateTopPadding(),
+                                    bottom = if (isImmersive) 0.dp else innerPadding.calculateBottomPadding()
                                 )
                         ) {
-                            if (!uiState.hasStoragePermission && !isShorts) {
+                            if (!uiState.hasStoragePermission && !isImmersive) {
                                 Card(
                                     colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1515)),
                                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF5252).copy(alpha = 0.5f)),
@@ -402,7 +409,7 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .weight(1f)
-                                    .then(if (isShorts) Modifier else Modifier.statusBarsPadding())
+                                    .then(if (isImmersive) Modifier else Modifier.statusBarsPadding())
                             ) {
                             when (uiState.currentTab) {
                                 NavigationTab.NOW_PLAYING -> {

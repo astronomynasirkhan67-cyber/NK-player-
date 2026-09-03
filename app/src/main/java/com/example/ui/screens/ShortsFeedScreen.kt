@@ -23,9 +23,12 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -52,27 +55,60 @@ import com.example.data.model.VideoItem
 import com.example.ui.viewmodel.MusicViewModel
 
 /**
- * Custom VideoView that scales edge-to-edge to occupy the full container,
- * providing the modern vertical fullscreen short-video presentation without black bars.
+ * AspectFitVideoView:
+ * Strictly preserves the video's original aspect ratio using "fit/contain" behavior.
+ * 9:16 remains 9:16, 16:9 remains 16:9, 4:3 remains 4:3.
+ * Never stretches or crops the video. The entire original video is completely visible.
  */
-class ScaledVideoView(context: Context) : VideoView(context) {
+class AspectFitVideoView(context: Context) : VideoView(context) {
+    private var videoW = 0
+    private var videoH = 0
+
+    fun updateVideoSize(w: Int, h: Int) {
+        if (w > 0 && h > 0 && (w != videoW || h != videoH)) {
+            videoW = w
+            videoH = h
+            requestLayout()
+        }
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val width = getDefaultSize(0, widthMeasureSpec)
-        val height = getDefaultSize(0, heightMeasureSpec)
-        setMeasuredDimension(width, height)
+        val parentWidth = getDefaultSize(0, widthMeasureSpec)
+        val parentHeight = getDefaultSize(0, heightMeasureSpec)
+
+        if (videoW > 0 && videoH > 0 && parentWidth > 0 && parentHeight > 0) {
+            val videoRatio = videoW.toFloat() / videoH.toFloat()
+            val parentRatio = parentWidth.toFloat() / parentHeight.toFloat()
+
+            val measuredWidth: Int
+            val measuredHeight: Int
+
+            if (videoRatio > parentRatio) {
+                // Video is wider than screen: fit width, pillarbox/letterbox top & bottom
+                measuredWidth = parentWidth
+                measuredHeight = (parentWidth / videoRatio).toInt().coerceAtMost(parentHeight)
+            } else {
+                // Video is taller than screen: fit height, pillarbox/letterbox left & right
+                measuredHeight = parentHeight
+                measuredWidth = (parentHeight * videoRatio).toInt().coerceAtMost(parentWidth)
+            }
+            setMeasuredDimension(measuredWidth, measuredHeight)
+        } else {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
     }
 }
 
 /**
- * Pure Fullscreen Vertical Shorts / Reels Feed.
+ * Pure Vertical Shorts / Reels Feed.
  *
- * Strict Constraints:
- * - NO top header, search bar, or tabs
- * - NO like, views, comments, share, heart buttons or counts
- * - NO video title, filename, "Device Video", duration badge, or watch time
- * - ONLY the fullscreen short video itself
+ * Requirements:
+ * - NO large top header, search bar, or tabs
+ * - NO video title, filename, "Device Video", duration badge, or watch-time text
+ * - NO comments, share button, or unnecessary controls
+ * - RESTORED: ❤️ Favorite / Heart (functional toggle) & 👁️ Views / View count
  * - Strictly filters for videos with duration <= 60 seconds
- * - Real device media only (no sample or demo videos)
+ * - Original aspect ratio strictly preserved (fit/contain, no stretch, no crop)
  * - Automatic playback from beginning on swipe
  * - Immediate resource release on page change
  */
@@ -188,8 +224,8 @@ fun ShortsFeedScreen(
 
 /**
  * Individual Short Video Item:
- * Strictly the video itself, full screen, edge to edge.
- * Tapping pauses/resumes playback.
+ * Fits the original video without stretching or cropping.
+ * Features restored ❤️ Favorite and 👁️ Views count controls.
  */
 @Composable
 private fun ShortVideoPage(
@@ -198,7 +234,7 @@ private fun ShortVideoPage(
     viewModel: MusicViewModel
 ) {
     var isUserPaused by remember(video.id) { mutableStateOf(false) }
-    var videoViewRef by remember { mutableStateOf<ScaledVideoView?>(null) }
+    var videoViewRef by remember { mutableStateOf<AspectFitVideoView?>(null) }
 
     // When page is swiped away, release underlying playback resources immediately
     DisposableEffect(video.id, isActive) {
@@ -227,12 +263,13 @@ private fun ShortVideoPage(
                         viewModel.resumeVideo()
                     }
                 }
-            }
+            },
+        contentAlignment = Alignment.Center
     ) {
         if (isActive && video.uri.isNotBlank()) {
             AndroidView(
                 factory = { context ->
-                    ScaledVideoView(context).apply {
+                    AspectFitVideoView(context).apply {
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
@@ -240,13 +277,17 @@ private fun ShortVideoPage(
                         setVideoURI(Uri.parse(video.uri))
                         setOnPreparedListener { mp ->
                             mp.isLooping = true
+                            mp.setOnVideoSizeChangedListener { _, w, h ->
+                                updateVideoSize(w, h)
+                            }
+                            updateVideoSize(mp.videoWidth, mp.videoHeight)
                             seekTo(0)
                             if (!isUserPaused) {
                                 start()
                             }
                         }
                         setOnErrorListener { _, _, _ ->
-                            // Handle media errors gracefully without crashing or showing system dialogs
+                            // Handle media errors gracefully without crashing
                             true
                         }
                         setOnCompletionListener {
@@ -295,6 +336,66 @@ private fun ShortVideoPage(
                         modifier = Modifier.size(36.dp)
                     )
                 }
+            }
+        }
+
+        // Restored Right-Side Floating Controls: ❤️ Favorite and 👁️ Views Count
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            // ❤️ Favorite / Heart Button (functional toggle)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .clickable { viewModel.toggleVideoFavorite(video) }
+                    .testTag("shorts_favorite_button")
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.55f),
+                    modifier = Modifier.size(48.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (video.isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = "Favorite",
+                            tint = if (video.isFavorite) Color(0xFFFF2A6D) else Color.White,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+            }
+
+            // 👁️ Views / View Count (functional view count tracking)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.testTag("shorts_views_indicator")
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.55f),
+                    modifier = Modifier.size(44.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Filled.Visibility,
+                            contentDescription = "Views",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${video.playCount}",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
