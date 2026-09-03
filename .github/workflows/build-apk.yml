@@ -29,24 +29,36 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
+
+      - name: Restore Gradle Wrapper Jar
+        run: |
+          mkdir -p gradle/wrapper
+          if [ ! -f gradle/wrapper/gradle-wrapper.jar ] && [ -f gradle/wrapper/gradle-wrapper.jar.base64 ]; then
+            echo "Restoring gradle-wrapper.jar from base64 encoding..."
+            base64 -d gradle/wrapper/gradle-wrapper.jar.base64 > gradle/wrapper/gradle-wrapper.jar
+          fi
 
       - name: Make Gradle Wrapper executable
         run: chmod +x ./gradlew
 
-      - name: Verify Gradle Wrapper
+      - name: Verify Gradle Environment
         run: ./gradlew --version
 
-      - name: Restore debug keystore
+      - name: Restore or generate debug keystore
         run: |
           if [ -f debug.keystore.base64 ] && [ ! -f debug.keystore ]; then
+            echo "Decoding debug.keystore from debug.keystore.base64..."
             base64 -d debug.keystore.base64 > debug.keystore || true
+          fi
+          if [ ! -f debug.keystore ]; then
+            echo "Generating fallback debug.keystore..."
+            keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" || true
           fi
 
       - name: Build Debug APK
-        run: ./gradlew clean assembleDebug --stacktrace --no-daemon
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
 
-      - name: Find generated APK
+      - name: Locate generated APK
         id: locate-apk
         shell: bash
         run: |
