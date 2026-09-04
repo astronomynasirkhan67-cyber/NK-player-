@@ -2,12 +2,14 @@ package com.example.ui.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.IntentSender
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.MusicAudioEngine
 import com.example.data.local.AppDatabase
 import com.example.data.local.LocalMediaScanner
+import com.example.data.local.MediaDeleteResult
 import com.example.data.local.MediaFileManager
 import com.example.data.local.MediaTarget
 import com.example.data.model.AppTheme
@@ -854,45 +856,107 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun performDelete(target: MediaTarget) {
+    private var pendingDeleteTarget: MediaTarget? = null
+
+    fun performDelete(
+        target: MediaTarget,
+        onLaunchConsent: ((IntentSender) -> Unit)? = null
+    ) {
         val app = getApplication<Application>()
-        // If current song is being deleted, stop playback
+        // Close the dialog immediately
+        _uiState.value = _uiState.value.copy(activeMediaAction = null)
+
+        val result = MediaFileManager.deleteMedia(app, target)
+        when (result) {
+            is MediaDeleteResult.Success -> {
+                finalizeMediaDeletion(target)
+            }
+            is MediaDeleteResult.RequiresConsent -> {
+                pendingDeleteTarget = target
+                if (onLaunchConsent != null) {
+                    onLaunchConsent(result.intentSender)
+                } else {
+                    val errorMsg = "Unable to delete this media file. Android requires permission to remove this file."
+                    Toast.makeText(app, errorMsg, Toast.LENGTH_LONG).show()
+                    _uiState.value = _uiState.value.copy(
+                        userFeedbackMessage = errorMsg,
+                        activeMediaTarget = null
+                    )
+                }
+            }
+            is MediaDeleteResult.Failure -> {
+                val errorMsg = "Delete failed: ${result.reason}"
+                Toast.makeText(app, errorMsg, Toast.LENGTH_LONG).show()
+                _uiState.value = _uiState.value.copy(
+                    userFeedbackMessage = errorMsg,
+                    activeMediaTarget = null
+                )
+            }
+        }
+    }
+
+    fun onSystemDeleteConfirmed() {
+        val target = pendingDeleteTarget ?: return
+        pendingDeleteTarget = null
+        finalizeMediaDeletion(target)
+    }
+
+    fun onSystemDeleteCancelled() {
+        pendingDeleteTarget = null
+        val app = getApplication<Application>()
+        Toast.makeText(app, "Delete cancelled", Toast.LENGTH_SHORT).show()
+        _uiState.value = _uiState.value.copy(
+            activeMediaTarget = null,
+            activeMediaAction = null
+        )
+    }
+
+    private fun finalizeMediaDeletion(target: MediaTarget) {
+        val app = getApplication<Application>()
+        // If current song is being deleted, stop audio playback and clear it
         if (target is MediaTarget.SongMedia && _uiState.value.currentSong?.id == target.song.id) {
             audioEngine.stop()
             _uiState.value = _uiState.value.copy(
                 currentSong = null,
                 isPlaying = false,
+                durationSec = 0,
                 currentPositionSec = 0f
             )
         }
         // If current video is being deleted, close video player
         if (target is MediaTarget.VideoMedia && _uiState.value.currentVideo?.id == target.video.id) {
             closeVideoPlayer()
+            _uiState.value = _uiState.value.copy(
+                currentVideo = null,
+                isVideoPlaying = false
+            )
         }
 
-        val result = MediaFileManager.deleteMedia(app, target)
-        result.onSuccess {
-            viewModelScope.launch {
-                when (target) {
-                    is MediaTarget.SongMedia -> {
-                        repository.deleteSong(target.song.id)
-                    }
-                    is MediaTarget.VideoMedia -> {
-                        repository.deleteVideo(target.video.id)
-                    }
-                }
-                val msg = "Deleted \"${target.title}\" successfully"
-                Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
-                _uiState.value = _uiState.value.copy(
-                    activeMediaTarget = null,
-                    activeMediaAction = null,
-                    userFeedbackMessage = msg
-                )
+        // Clean from current in-memory playlist queue so it cannot still be played
+        if (target is MediaTarget.SongMedia) {
+            playbackQueue = playbackQueue.filter { it.id != target.song.id }
+            originalQueue = originalQueue.filter { it.id != target.song.id }
+            if (queueIndex >= playbackQueue.size) {
+                queueIndex = (playbackQueue.size - 1).coerceAtLeast(0)
             }
-        }.onFailure { ex ->
-            val errorMsg = "Delete failed: ${ex.localizedMessage ?: "Unknown error"}"
-            Toast.makeText(app, errorMsg, Toast.LENGTH_LONG).show()
-            _uiState.value = _uiState.value.copy(userFeedbackMessage = errorMsg)
+        }
+
+        viewModelScope.launch {
+            when (target) {
+                is MediaTarget.SongMedia -> {
+                    repository.deleteSong(target.song.id)
+                }
+                is MediaTarget.VideoMedia -> {
+                    repository.deleteVideo(target.video.id)
+                }
+            }
+            val msg = "Deleted successfully"
+            Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
+            _uiState.value = _uiState.value.copy(
+                activeMediaTarget = null,
+                activeMediaAction = null,
+                userFeedbackMessage = msg
+            )
         }
     }
 

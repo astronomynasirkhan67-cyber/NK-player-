@@ -1,14 +1,17 @@
 package com.example.data.local
 
+import android.app.RecoverableSecurityException
 import android.content.ClipData
 import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
@@ -82,6 +85,12 @@ data class MediaMoveResult(
     val destinationFolderName: String
 )
 
+sealed class MediaDeleteResult {
+    object Success : MediaDeleteResult()
+    data class RequiresConsent(val intentSender: IntentSender) : MediaDeleteResult()
+    data class Failure(val reason: String) : MediaDeleteResult()
+}
+
 object MediaFileManager {
 
     private const val TAG = "MediaFileManager"
@@ -93,8 +102,8 @@ object MediaFileManager {
         var filePath: String? = null
         var fileSize: Long = 0L
 
-        if (uri.scheme == "file") {
-            filePath = uri.path
+        if (uri.scheme == "file" || uri.scheme.isNullOrEmpty() || item.uriString.startsWith("/")) {
+            filePath = if (uri.scheme == "file") uri.path else item.uriString
             fileName = filePath?.let { File(it).name }
             fileSize = filePath?.let { File(it).length() } ?: 0L
         } else if (uri.scheme == "content") {
@@ -117,6 +126,21 @@ object MediaFileManager {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error resolving MediaStore info for $uri", e)
+            }
+
+            // Fallback for SAF Document or generic content URIs
+            if (fileName == null) {
+                try {
+                    val openableProj = arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
+                    context.contentResolver.query(uri, openableProj, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameCol = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                            val sizeCol = cursor.getColumnIndex(OpenableColumns.SIZE)
+                            if (nameCol != -1) fileName = cursor.getString(nameCol)
+                            if (sizeCol != -1 && fileSize == 0L) fileSize = cursor.getLong(sizeCol)
+                        }
+                    }
+                } catch (_: Exception) {}
             }
         }
 
@@ -424,38 +448,214 @@ object MediaFileManager {
         return Result.failure(Exception("Failed to move media file to ${destinationDir.name}"))
     }
 
-    fun deleteMedia(context: Context, item: MediaTarget): Result<Boolean> {
+    fun deleteMedia(context: Context, item: MediaTarget): MediaDeleteResult {
         val info = resolveFileInfo(context, item)
-        var fileDeleted = false
-        var contentDeleted = false
+        val uri = info.uri
+        val scheme = uri.scheme?.lowercase()
 
-        // 1. Delete physical file if available
-        if (info.file != null && info.file.exists()) {
+        Log.d(TAG, "Deleting media: target='${item.title}', uri='$uri', scheme='$scheme', path='${info.filePath}'")
+
+        // 1. SAF DocumentsContract URI
+        if (scheme == "content" && DocumentsContract.isDocumentUri(context, uri)) {
             try {
-                fileDeleted = info.file.delete()
-                MediaScannerConnection.scanFile(
-                    context,
-                    arrayOf(info.file.absolutePath),
-                    null,
-                    null
-                )
+                val deleted = DocumentsContract.deleteDocument(context.contentResolver, uri)
+                if (deleted) {
+                    Log.i(TAG, "Successfully deleted SAF document: $uri")
+                    return MediaDeleteResult.Success
+                }
             } catch (e: Exception) {
-                Log.w(TAG, "File delete failed", e)
+                Log.w(TAG, "DocumentsContract.deleteDocument failed for $uri", e)
             }
         }
 
-        // 2. Delete from MediaStore ContentResolver
-        try {
-            val rows = context.contentResolver.delete(info.uri, null, null)
-            contentDeleted = rows > 0
-        } catch (e: Exception) {
-            Log.w(TAG, "ContentResolver delete failed", e)
+        // 2. MediaStore Content URI handling
+        val isMediaStoreContentUri = scheme == "content" && (
+            uri.authority == "media" ||
+            uri.authority == MediaStore.AUTHORITY ||
+            uri.toString().startsWith("content://media/")
+        )
+
+        if (isMediaStoreContentUri) {
+            // A. Try direct ContentResolver deletion first
+            try {
+                val rows = context.contentResolver.delete(uri, null, null)
+                if (rows > 0) {
+                    Log.i(TAG, "Successfully deleted MediaStore URI: $uri ($rows rows deleted)")
+                    // Verify if local physical file still lingers
+                    if (info.file != null && info.file.exists()) {
+                        try { info.file.delete() } catch (_: Exception) {}
+                    }
+                    return MediaDeleteResult.Success
+                }
+            } catch (secEx: SecurityException) {
+                Log.w(TAG, "SecurityException deleting MediaStore URI $uri, requesting system authorization", secEx)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    try {
+                        val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, listOf(uri))
+                        return MediaDeleteResult.RequiresConsent(pendingIntent.intentSender)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "MediaStore.createDeleteRequest failed", e)
+                        return MediaDeleteResult.Failure("Unable to delete this media file. Android requires permission to remove this file.")
+                    }
+                } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q && secEx is RecoverableSecurityException) {
+                    return MediaDeleteResult.RequiresConsent(secEx.userAction.actionIntent.intentSender)
+                } else {
+                    return MediaDeleteResult.Failure("Unable to delete this media file. Android requires permission to remove this file.")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "ContentResolver.delete failed for $uri", e)
+            }
+
+            // B. If rows == 0 on Android 11+, check if createDeleteRequest is needed
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, listOf(uri))
+                    return MediaDeleteResult.RequiresConsent(pendingIntent.intentSender)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Secondary createDeleteRequest failed", e)
+                }
+            }
+
+            // C. Fallback: try physical file delete if available
+            if (info.file != null && info.file.exists()) {
+                try {
+                    if (info.file.delete()) {
+                        MediaScannerConnection.scanFile(context, arrayOf(info.file.absolutePath), null, null)
+                        return MediaDeleteResult.Success
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Physical file delete failed after MediaStore delete returned 0", e)
+                }
+            }
         }
 
-        return if (fileDeleted || contentDeleted || info.file == null) {
-            Result.success(true)
-        } else {
-            Result.failure(Exception("Unable to delete media file from storage"))
+        // 3. Direct File / Path / file:// URI handling
+        val candidateFile = when {
+            info.file != null -> info.file
+            scheme == "file" -> uri.path?.let { File(it) }
+            item.uriString.startsWith("/") -> File(item.uriString)
+            else -> null
         }
+
+        if (candidateFile != null && candidateFile.exists()) {
+            val isInternal = candidateFile.absolutePath.startsWith(context.filesDir.absolutePath) ||
+                    candidateFile.absolutePath.startsWith(context.cacheDir.absolutePath)
+
+            // Try direct filesystem delete
+            val fileDeleted = try {
+                candidateFile.delete()
+            } catch (e: Exception) {
+                Log.w(TAG, "candidateFile.delete() failed", e)
+                false
+            }
+
+            if (fileDeleted) {
+                Log.i(TAG, "Successfully deleted local file: ${candidateFile.absolutePath}")
+                try {
+                    MediaScannerConnection.scanFile(context, arrayOf(candidateFile.absolutePath), null, null)
+                } catch (_: Exception) {}
+                if (scheme == "content") {
+                    try { context.contentResolver.delete(uri, null, null) } catch (_: Exception) {}
+                }
+                return MediaDeleteResult.Success
+            }
+
+            if (isInternal) {
+                return MediaDeleteResult.Failure("Delete failed from internal storage.")
+            }
+
+            // Under Scoped Storage on Android 10+, direct File.delete() returns false for external media.
+            // Look up the MediaStore URI for this file path:
+            val discoveredMediaStoreUri = findMediaStoreUriForFile(context, candidateFile, item.isVideo)
+            if (discoveredMediaStoreUri != null) {
+                try {
+                    val rows = context.contentResolver.delete(discoveredMediaStoreUri, null, null)
+                    if (rows > 0) {
+                        return MediaDeleteResult.Success
+                    }
+                } catch (secEx: SecurityException) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        try {
+                            val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, listOf(discoveredMediaStoreUri))
+                            return MediaDeleteResult.RequiresConsent(pendingIntent.intentSender)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "createDeleteRequest failed for discovered URI", e)
+                        }
+                    } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.Q && secEx is RecoverableSecurityException) {
+                        return MediaDeleteResult.RequiresConsent(secEx.userAction.actionIntent.intentSender)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "ContentResolver delete failed on discovered MediaStore URI", e)
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    try {
+                        val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, listOf(discoveredMediaStoreUri))
+                        return MediaDeleteResult.RequiresConsent(pendingIntent.intentSender)
+                    } catch (_: Exception) {}
+                }
+            }
+
+            return MediaDeleteResult.Failure("Unable to delete this media file. Android requires permission to remove this file.")
+        }
+
+        // 4. Fallback for any remaining content URI
+        if (scheme == "content") {
+            try {
+                val rows = context.contentResolver.delete(uri, null, null)
+                if (rows > 0) {
+                    return MediaDeleteResult.Success
+                }
+            } catch (secEx: SecurityException) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    try {
+                        val pendingIntent = MediaStore.createDeleteRequest(context.contentResolver, listOf(uri))
+                        return MediaDeleteResult.RequiresConsent(pendingIntent.intentSender)
+                    } catch (_: Exception) {}
+                }
+                return MediaDeleteResult.Failure("Unable to delete this media file. Android requires permission to remove this file.")
+            } catch (e: Exception) {
+                Log.w(TAG, "Generic contentResolver.delete failed", e)
+            }
+        }
+
+        return MediaDeleteResult.Failure("Unable to delete media file from storage")
+    }
+
+    private fun findMediaStoreUriForFile(context: Context, file: File, isVideo: Boolean): Uri? {
+        val tableUri = if (isVideo) {
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        } else {
+            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        }
+
+        val projection = arrayOf(MediaStore.MediaColumns._ID)
+        val selection = "${MediaStore.MediaColumns.DATA} = ?"
+        val selectionArgs = arrayOf(file.absolutePath)
+
+        try {
+            context.contentResolver.query(tableUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                    return ContentUris.withAppendedId(tableUri, id)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed querying MediaStore for path ${file.absolutePath}", e)
+        }
+
+        try {
+            val filesUri = MediaStore.Files.getContentUri("external")
+            context.contentResolver.query(filesUri, projection, selection, selectionArgs, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                    return ContentUris.withAppendedId(filesUri, id)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed querying MediaStore.Files for path ${file.absolutePath}", e)
+        }
+
+        return null
     }
 }

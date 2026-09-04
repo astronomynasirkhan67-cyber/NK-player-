@@ -1,199 +1,231 @@
-Create a professional and detailed README.md for my Android application called "Music Nasir Khan".
-
-This is a modern Android music and media player application created by Nasir Khan.
-
-The README should look professional, attractive, and well-organized, like a real production Android application on GitHub.
-
-Include the following sections:
-
 # Music Nasir Khan
 
-Write a strong introduction explaining that Music Nasir Khan is a modern Android multimedia application designed to provide a smooth and beautiful experience for listening to music and watching short and long-form videos.
+A modern, high-performance Android multimedia application engineered by **Nasir Khan** to deliver a seamless, visually immersive experience for local music listening, dynamic short-form videos (Shorts), and full-length video playback.
+
+---
 
 ## ✨ Features
 
-Include detailed descriptions of these features:
-
 ### 🎵 Music Player
-- Modern music player interface
-- Local audio playback
-- Play, pause, previous and next controls
-- Seek/progress bar
-- Shuffle mode
-- Repeat mode
-- Favorite/like functionality
-- Track information
-- Artist and album information
-- Playback progress and duration
-- Beautiful animated player interface
+- **Modern Playback Engine**: Seamless local audio playback with high-fidelity sound output.
+- **Comprehensive Controls**: Smooth Play, Pause, Skip Next, Previous, and precision seek bar controls.
+- **Queue Management**: Full support for Shuffle mode and Repeat modes (Off, Repeat All, Repeat One).
+- **Metadata Display**: Real-time display of track title, artist, album, duration, and elapsed playback time.
+- **Favorites Integration**: Quick one-tap heart toggle to curate favorite tracks into a dedicated view.
+- **Animated Visualizer**: Dynamic animated waveform visualizer reacting to playback state.
 
 ### 💿 Vinyl Turntable Mode
-Describe the unique Vinyl Turntable Mode.
-Explain that it provides a visual vinyl-record-inspired music playback experience with a rotating record and stylized turntable interface.
+- **Retro Interactive Disc**: A stylized, rotating vinyl record turntable visualization for currently playing tracks.
+- **Dynamic Spin Mechanics**: Disc spins during active playback and smoothly glides to a stop when paused.
+- **Immersive Aesthetic**: Elevates the listening experience with visual elegance and analog charm.
 
 ### 🎬 Shorts
-The application includes a Shorts section for short vertical videos.
-
-Mention:
-- Vertical video playback
-- Smooth scrolling/video experience
-- Like/favorite functionality
-- View counter
-- Videos up to 90 seconds (1 minute 30 seconds)
-- Correct original video aspect ratio
-- Portrait videos remain portrait without stretching or distortion
+- **Vertical Feed Experience**: Optimized short-form video playback designed for quick browsing and immersive portrait consumption.
+- **Smooth Snapping & Scrolling**: Effortless navigation between short videos.
+- **Interaction Tools**: In-feed like/favorite toggles and view counter tracking.
+- **90-Second Format**: Strict 90-second (1 min 30 sec) duration ceiling dedicated to concise content.
+- **Aspect Ratio Preservation**: Automatic detection preserving true portrait dimensions without distortion or unnatural stretching.
 
 ### 📺 Long Videos
-Include a dedicated Videos section for longer videos.
-
-Mention:
-- Long-form video playback
-- Fullscreen support
-- Portrait and landscape video support
-- Device rotation support
-- Original video aspect ratio preservation
-- No stretching or unwanted cropping
-- Smooth playback controls
+- **Dedicated Video Section**: Streamlined gallery for long-form video files stored on the device.
+- **Immersive Fullscreen**: Seamless transitions to dedicated fullscreen viewing.
+- **Orientation & Rotation**: Fluid support for both portrait and landscape orientations, adapting naturally to device rotation.
+- **Zero Distortion**: Preserves original aspect ratios using intelligent fit and letterboxing/pillarboxing where necessary.
+- **Intuitive Overlay Controls**: Clean, accessible media controls for scrubbing, pausing, and resizing.
 
 ### ❤️ Favorites
-Users can mark songs and videos as favorites and easily access their preferred content.
+- Curate favorite songs, Shorts, and long videos with immediate access in specialized filtered collections.
 
 ### 📊 Statistics
-Include a Statistics section that can display playback-related information such as plays, views and other useful activity information.
+- **Activity & Engagement**: Tracks playback sessions, total listening time, play counts, and video view counts.
+- **Top Tracks & Recent History**: Comprehensive insights into most-played tracks and completed listening sessions.
 
 ### 🎨 Themes
-Include a Themes section that provides a modern visual customization experience for the application.
+- **Visual Customization Lab**: Multiple hand-crafted dark-themed color palettes (Cyberpunk Neon, Emerald Glow, Deep Amber, Sunset Magenta, and more).
+- **Real-Time Switcher**: Instant theme application across the entire application interface.
+
+---
 
 ## 🧭 Navigation
 
-Explain the application's bottom navigation system:
+The application features an intuitive, modern bottom navigation system with 6 accessible tabs:
 
-- Player
-- Music
-- Shorts
-- Videos
-- Stats
-- Themes
+| Tab | Icon | Description |
+| :--- | :---: | :--- |
+| **Player** | 💽 | Now Playing screen featuring album art or the interactive spinning Vinyl Turntable mode |
+| **Music** | 🎵 | Local audio library, playlist manager, and favorites list |
+| **Shorts** | ⚡ | Fast vertical video feed displaying videos up to 90 seconds |
+| **Videos** | 🎬 | Long-form video gallery with fullscreen and rotation playback |
+| **Stats** | 📊 | Listening statistics, play counts, view analytics, and top records |
+| **Themes** | 🎨 | Theme selector to customize colors and visual accents across the app |
 
-Explain that users can quickly move between the main sections without leaving the current application experience.
+Users can fluidly switch between tabs with zero disruption to background music playback.
+
+---
 
 ## 🎥 Video Experience
 
-Add a dedicated section explaining that the video player automatically respects the original video's dimensions and aspect ratio.
+The video player is built with strict adherence to visual geometry and display standards:
 
-Important points:
-- No video stretching
-- No distortion
-- Portrait videos remain proportional
-- Landscape videos remain proportional
-- Square videos remain proportional
-- Fullscreen support
-- Rotation support
-- Letterboxing/pillarboxing when required instead of stretching
+- **No Video Stretching**: Videos strictly retain their native width-to-height proportions.
+- **No Unwanted Distortion**: Content is rendered cleanly without artificial scaling or compression.
+- **Aspect Ratio Adaptation**:
+  - **Portrait Videos**: Maintained in true vertical orientation with clear framing.
+  - **Landscape Videos**: Rendered proportionally with adaptive letterboxing.
+  - **Square Videos**: Perfectly centered without edge clipping.
+- **Fullscreen & Rotation**: Seamlessly transitions between inline preview and full immersive mode when the device is rotated or the fullscreen button is tapped.
+
+---
 
 ## 🎧 Audio Experience
 
-Explain that the application is designed to provide a clean and intuitive local audio playback experience with easy access to music controls, favorites and playback information.
+Engineered for local music enthusiasts, Music Nasir Khan offers:
+- Fast media library indexing via Android MediaStore.
+- Low-latency audio playback controls.
+- Automatic track progression and seamless queue cycling.
+- Persistent state management retaining your current playlist position.
+
+---
 
 ## 📱 User Interface
 
-Describe the UI as:
-- Modern
-- Dark-themed
-- Clean
-- Responsive
-- Mobile-friendly
-- Smooth
-- Easy to navigate
-- Designed for Android smartphones
+- **Modern & Sleek**: Tailored with clean Material Design 3 guidelines.
+- **Dark-Themed Elegance**: High-contrast, eye-friendly dark surfaces with vibrant accent highlights.
+- **Responsive & Mobile-First**: Crafted specifically for Android smartphones with fluid animations and generous touch targets (min 48dp).
+- **Visual Identity**: Branded with the distinct **Music Nasir Khan** aesthetic.
 
-Mention the application's visual identity:
-"Music Nasir Khan"
+---
 
-## 🛠️ Technology
+## 🛠️ Technology Stack
 
-Create a technology section using only technologies that can be verified from the existing project files.
+| Layer | Technologies |
+| :--- | :--- |
+| **Language** | Kotlin (2.2.10) |
+| **UI Framework** | Jetpack Compose (BOM 2024.09.00), Material Design 3 |
+| **Architecture** | MVVM (Model-View-ViewModel), Clean Architecture, Repository Pattern |
+| **Concurrency & Async** | Kotlin Coroutines, StateFlow, SharedFlow |
+| **Local Persistence** | Room Database (2.7.0) with KSP |
+| **Media & Storage** | Android MediaStore API, Scoped Storage (API 29–36+), DocumentFile, MediaScanner |
+| **Lifecycle & Navigation** | AndroidX Lifecycle (2.8.7), Activity Compose (1.10.1) |
+| **Build System** | Gradle (Kotlin DSL), Android Gradle Plugin 9.1.1 |
 
-Do NOT invent technologies that are not actually present in the project.
-
-If the project uses Kotlin, Android SDK, Gradle, Jetpack or other libraries, list them accurately based on the project files.
+---
 
 ## 📂 Project Structure
 
-Provide a simple explanation of the important project directories and files based on the actual repository structure.
+```
+app/src/main/
+├── AndroidManifest.xml                  # App manifest & permissions
+├── java/com/example/
+│   ├── MainActivity.kt                  # Main entry point & bottom navigation host
+│   ├── audio/
+│   │   └── MusicAudioEngine.kt          # Audio playback engine and state
+│   ├── data/
+│   │   ├── local/
+│   │   │   ├── AppDatabase.kt           # Room Database definition & migrations
+│   │   │   ├── LocalMediaScanner.kt     # Scans device MediaStore for audio & video
+│   │   │   └── MediaFileManager.kt      # Scoped Storage file operations (Delete, Rename, Move, Share)
+│   │   ├── model/
+│   │   │   └── MusicModels.kt           # Data models: Song, VideoItem, Playlists, Themes, Stats
+│   │   └── repository/
+│   │       └── MusicRepository.kt       # Unified repository coordinating database & library cache
+│   └── ui/
+│       ├── components/                  # Reusable UI components & 3-dot management menus
+│       ├── screens/                     # Player, Playlists, Shorts, Videos, Stats, Themes screens
+│       ├── theme/                       # Color palettes, Typography, Theme definition
+│       └── viewmodel/
+│           └── MusicViewModel.kt        # App-wide UI state orchestration & action handling
+└── res/                                 # Strings, adaptive drawables, launcher icons
+```
+
+---
 
 ## 🚀 Build and Run
 
-Provide clear instructions for:
-1. Cloning the repository
-2. Opening it in Android Studio
-3. Syncing Gradle
-4. Building the project
-5. Running it on an Android device or emulator
+### Prerequisites
+- Android Studio Ladybug / Meerkat or newer
+- JDK 17 or higher
+- Android SDK with Platform 36 installed
 
-Use commands where appropriate.
+### 1. Clone the repository
+```bash
+git clone <repository-url>
+cd music-nasir-khan
+```
+
+### 2. Open in Android Studio
+- Launch Android Studio.
+- Select **Open** and choose the cloned project root folder.
+
+### 3. Sync Gradle
+- Allow Gradle to download dependencies and sync configuration files.
+
+### 4. Build the Project
+```bash
+gradle assembleDebug
+```
+
+### 5. Run on Device or Emulator
+- Connect your Android device via USB (with Developer Options and USB Debugging enabled) or start an Android Virtual Device (AVD).
+- Click the green **Run** button in Android Studio, or execute:
+```bash
+gradle installDebug
+```
+
+---
 
 ## 🔐 Permissions
 
-Document only the Android permissions actually required by the application based on the existing project.
+The app requests only standard media read permissions to locate local audio and video files:
 
-Do not invent permissions.
+| Permission | Minimum SDK | Purpose |
+| :--- | :---: | :--- |
+| `android.permission.READ_MEDIA_AUDIO` | API 33+ | Read local music and audio files |
+| `android.permission.READ_MEDIA_VIDEO` | API 33+ | Read local video files (Shorts and Videos) |
+| `android.permission.READ_EXTERNAL_STORAGE` | Up to API 32 | Read media files on Android 12 and older |
+| `android.permission.INTERNET` | All | Network capability if needed for remote streaming |
+
+*Note: The app adheres to Android Scoped Storage guidelines. File deletions leverage standard system consent prompts (`MediaStore.createDeleteRequest`) rather than requesting invasive all-files access.*
+
+---
 
 ## 📸 Screenshots
 
-Create a section where screenshots can be added later.
+*(Screenshots will be added in a future update)*
 
-Use placeholders such as:
+- `screenshots/player.png`
+- `screenshots/music.png`
+- `screenshots/shorts.png`
+- `screenshots/videos.png`
 
-screenshots/player.png
-screenshots/music.png
-screenshots/shorts.png
-screenshots/videos.png
-
-Do not claim screenshots exist if they are not present in the repository.
+---
 
 ## 🔄 Current Status
 
-Add a professional project status section explaining that the application is actively developed and improved.
+**Music Nasir Khan** is actively maintained and continuously improved. Current development milestones focus on:
+- Enhancing low-latency music and audio playback.
+- Optimizing vertical scrolling performance in the Shorts feed.
+- Advancing video aspect-ratio auto-detection across non-standard resolutions.
+- Expanding playlist creation and management capabilities.
+- Refining Material 3 transitions and user ergonomics.
 
-Mention that the current development focuses on:
-- Music playback
-- Short-video playback
-- Long-video playback
-- Navigation
-- Video aspect-ratio handling
-- User experience improvements
+---
 
 ## 🧑‍💻 Developer
 
-Developer:
-Nasir Khan
+- **Developer**: Nasir Khan
+- **Project**: Music Nasir Khan
 
-Project:
-Music Nasir Khan
+---
 
 ## 📄 License
 
-If the repository does not already contain a license, do NOT invent a specific open-source license.
+License information will be added in a future update.
 
-Instead write:
-"License information will be added in a future update."
+---
 
 ## ⭐ Final Section
 
-End with a professional statement:
+Music Nasir Khan is a personal Android multimedia project focused on combining music playback, short videos, long-form videos and a modern visual experience in one application.
 
-"Music Nasir Khan is a personal Android multimedia project focused on combining music playback, short videos, long-form videos and a modern visual experience in one application."
-
-Also add:
-
-"If you like the project, consider giving the repository a ⭐."
-
-IMPORTANT:
-- Make the README visually attractive using Markdown.
-- Use headings, emojis, tables and bullet points where appropriate.
-- Keep the writing professional.
-- Do not claim features that are not actually present in the project.
-- Before writing technical details, inspect the existing repository files and use the actual project configuration.
-- Do not modify application source code.
-- Only create/update README.md.
+If you like the project, consider giving the repository a ⭐.

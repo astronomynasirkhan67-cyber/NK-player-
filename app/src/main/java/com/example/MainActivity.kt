@@ -1,6 +1,7 @@
 package com.example
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -9,6 +10,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -128,6 +130,16 @@ class MainActivity : ComponentActivity() {
             ) { permissionsMap ->
                 val isGranted = permissionsMap.values.any { it }
                 viewModel.updatePermissionStatus(isGranted)
+            }
+
+            val systemDeleteLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.StartIntentSenderForResult()
+            ) { result ->
+                if (result.resultCode == Activity.RESULT_OK) {
+                    viewModel.onSystemDeleteConfirmed()
+                } else {
+                    viewModel.onSystemDeleteCancelled()
+                }
             }
 
             LaunchedEffect(Unit) {
@@ -558,7 +570,11 @@ class MainActivity : ComponentActivity() {
                                         theme = uiState.currentTheme,
                                         onDismiss = { viewModel.closeMediaAction() },
                                         onConfirmDelete = {
-                                            viewModel.performDelete(activeTarget)
+                                            viewModel.performDelete(activeTarget) { intentSender ->
+                                                systemDeleteLauncher.launch(
+                                                    IntentSenderRequest.Builder(intentSender).build()
+                                                )
+                                            }
                                         }
                                     )
                                 }
