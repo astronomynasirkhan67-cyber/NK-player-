@@ -1,9 +1,7 @@
 package com.example.ui.screens
 
-import android.content.Context
 import android.net.Uri
 import android.view.ViewGroup
-import android.widget.VideoView
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -45,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,52 +51,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.data.model.VideoItem
+import com.example.ui.components.AspectFitVideoContainer
+import com.example.ui.components.AspectFitVideoView
+import com.example.ui.components.VideoDimensionHelper
 import com.example.ui.viewmodel.MusicViewModel
-
-/**
- * AspectFitVideoView:
- * Strictly preserves the video's original aspect ratio using "fit/contain" behavior.
- * 9:16 remains 9:16, 16:9 remains 16:9, 4:3 remains 4:3.
- * Never stretches or crops the video. The entire original video is completely visible.
- */
-class AspectFitVideoView(context: Context) : VideoView(context) {
-    private var videoW = 0
-    private var videoH = 0
-
-    fun updateVideoSize(w: Int, h: Int) {
-        if (w > 0 && h > 0 && (w != videoW || h != videoH)) {
-            videoW = w
-            videoH = h
-            requestLayout()
-        }
-    }
-
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val parentWidth = getDefaultSize(0, widthMeasureSpec)
-        val parentHeight = getDefaultSize(0, heightMeasureSpec)
-
-        if (videoW > 0 && videoH > 0 && parentWidth > 0 && parentHeight > 0) {
-            val videoRatio = videoW.toFloat() / videoH.toFloat()
-            val parentRatio = parentWidth.toFloat() / parentHeight.toFloat()
-
-            val measuredWidth: Int
-            val measuredHeight: Int
-
-            if (videoRatio > parentRatio) {
-                // Video is wider than screen: fit width, pillarbox/letterbox top & bottom
-                measuredWidth = parentWidth
-                measuredHeight = (parentWidth / videoRatio).toInt().coerceAtMost(parentHeight)
-            } else {
-                // Video is taller than screen: fit height, pillarbox/letterbox left & right
-                measuredHeight = parentHeight
-                measuredWidth = (parentHeight * videoRatio).toInt().coerceAtMost(parentWidth)
-            }
-            setMeasuredDimension(measuredWidth, measuredHeight)
-        } else {
-            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        }
-    }
-}
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Pure Vertical Shorts / Reels Feed.
@@ -107,8 +66,8 @@ class AspectFitVideoView(context: Context) : VideoView(context) {
  * - NO video title, filename, "Device Video", duration badge, or watch-time text
  * - NO comments, share button, or unnecessary controls
  * - RESTORED: ❤️ Favorite / Heart (functional toggle) & 👁️ Views / View count
- * - Strictly filters for videos with duration <= 60 seconds
- * - Original aspect ratio strictly preserved (fit/contain, no stretch, no crop)
+ * - Strictly filters for videos with duration <= 90 seconds (1 minute 30 seconds)
+ * - Original aspect ratio strictly preserved (fit/contain, never stretched, never cropped)
  * - Automatic playback from beginning on swipe
  * - Immediate resource release on page change
  */
@@ -118,10 +77,11 @@ fun ShortsFeedScreen(
     modifier: Modifier = Modifier
 ) {
     val rawShorts by viewModel.shorts.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
 
-    // Strictly enforce duration <= 60 seconds
-    val validShorts = remember(rawShorts) {
-        rawShorts.filter { it.durationSeconds in 1..60 }
+    // Strictly enforce duration <= 90 seconds (1 minute 30 seconds)
+    val validShorts = remember(rawShorts, uiState.shortsThresholdSeconds) {
+        rawShorts.filter { it.durationSeconds in 1..uiState.shortsThresholdSeconds }
     }
 
     // Stop playback when leaving the Shorts screen
@@ -138,7 +98,7 @@ fun ShortsFeedScreen(
             .testTag("shorts_fullscreen_feed")
     ) {
         if (validShorts.isEmpty()) {
-            // Clean empty state when no shorts (<= 60s) exist on device
+            // Clean empty state when no shorts (<= 90s) exist on device
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -163,7 +123,7 @@ fun ShortsFeedScreen(
                         textAlign = TextAlign.Center
                     )
                     Text(
-                        text = "Short videos (60 seconds or less) stored on your device will automatically appear here in vertical playback.",
+                        text = "Short videos (90 seconds or less) stored on your device will automatically appear here in vertical playback.",
                         color = Color.White.copy(alpha = 0.65f),
                         fontSize = 14.sp,
                         textAlign = TextAlign.Center,
@@ -186,8 +146,7 @@ fun ShortsFeedScreen(
                         Text(
                             "Scan Device Storage",
                             color = Color.Black,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -195,22 +154,23 @@ fun ShortsFeedScreen(
         } else {
             val pagerState = rememberPagerState(pageCount = { validShorts.size })
 
-            // When user swipes to a new Short, automatically play it from the beginning
-            LaunchedEffect(pagerState.currentPage, validShorts) {
-                if (pagerState.currentPage in validShorts.indices) {
-                    val currentVideo = validShorts[pagerState.currentPage]
-                    viewModel.playVideo(currentVideo)
+            LaunchedEffect(pagerState.currentPage) {
+                val activeVideo = validShorts.getOrNull(pagerState.currentPage)
+                if (activeVideo != null) {
+                    viewModel.playVideo(activeVideo)
                 }
             }
 
             VerticalPager(
                 state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-                beyondViewportPageCount = 1,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("shorts_vertical_pager"),
+                beyondViewportPageCount = 0,
                 key = { page -> validShorts.getOrNull(page)?.id ?: page }
             ) { page ->
                 val video = validShorts[page]
-                val isActive = pagerState.currentPage == page
+                val isActive = page == pagerState.currentPage
 
                 ShortVideoPage(
                     video = video,
@@ -224,7 +184,8 @@ fun ShortsFeedScreen(
 
 /**
  * Individual Short Video Item:
- * Fits the original video without stretching or cropping.
+ * Fits the original video without stretching or cropping (fit/contain).
+ * Preserves exact aspect ratio (portrait, landscape, square) with letterboxing/pillarboxing.
  * Features restored ❤️ Favorite and 👁️ Views count controls.
  */
 @Composable
@@ -233,8 +194,25 @@ private fun ShortVideoPage(
     isActive: Boolean,
     viewModel: MusicViewModel
 ) {
+    val context = LocalContext.current
     var isUserPaused by remember(video.id) { mutableStateOf(false) }
     var videoViewRef by remember { mutableStateOf<AspectFitVideoView?>(null) }
+    var videoRatio by remember(video.id) {
+        mutableStateOf<Float?>(VideoDimensionHelper.parseRatio(video.resolution))
+    }
+
+    // Inspect video file metadata to ensure rotation (90/270 degrees) and display dimensions are exact
+    LaunchedEffect(video.uri) {
+        withContext(Dispatchers.IO) {
+            val dims = VideoDimensionHelper.getDisplayDimensions(context, video.uri)
+            if (dims != null && dims.first > 0 && dims.second > 0) {
+                val ratio = dims.first.toFloat() / dims.second.toFloat()
+                withContext(Dispatchers.Main) {
+                    videoRatio = ratio
+                }
+            }
+        }
+    }
 
     // When page is swiped away, release underlying playback resources immediately
     DisposableEffect(video.id, isActive) {
@@ -266,54 +244,68 @@ private fun ShortVideoPage(
             },
         contentAlignment = Alignment.Center
     ) {
-        if (isActive && video.uri.isNotBlank()) {
-            AndroidView(
-                factory = { context ->
-                    AspectFitVideoView(context).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        setVideoURI(Uri.parse(video.uri))
-                        setOnPreparedListener { mp ->
-                            mp.isLooping = true
-                            mp.setOnVideoSizeChangedListener { _, w, h ->
-                                updateVideoSize(w, h)
+        // Aspect-fit Video Container: strict contain/fit behavior, never stretches, never crops
+        AspectFitVideoContainer(
+            videoRatio = videoRatio,
+            modifier = Modifier.fillMaxSize()
+        ) { fitWidth, fitHeight ->
+            if (isActive && video.uri.isNotBlank()) {
+                AndroidView(
+                    factory = { ctx ->
+                        AspectFitVideoView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            setVideoURI(Uri.parse(video.uri))
+                            setOnPreparedListener { mp ->
+                                mp.isLooping = true
+                                mp.setOnVideoSizeChangedListener { _, w, h ->
+                                    if (w > 0 && h > 0) {
+                                        updateVideoSize(w, h)
+                                        if (videoRatio == null) {
+                                            videoRatio = w.toFloat() / h.toFloat()
+                                        }
+                                    }
+                                }
+                                updateVideoSize(mp.videoWidth, mp.videoHeight)
+                                if (videoRatio == null && mp.videoWidth > 0 && mp.videoHeight > 0) {
+                                    videoRatio = mp.videoWidth.toFloat() / mp.videoHeight.toFloat()
+                                }
+                                seekTo(0)
+                                if (!isUserPaused) {
+                                    start()
+                                }
                             }
-                            updateVideoSize(mp.videoWidth, mp.videoHeight)
-                            seekTo(0)
-                            if (!isUserPaused) {
-                                start()
+                            setOnErrorListener { _, _, _ ->
+                                // Handle media errors gracefully without crashing
+                                true
+                            }
+                            setOnCompletionListener {
+                                viewModel.onVideoCompleted(video.id)
+                                seekTo(0)
+                                if (!isUserPaused) {
+                                    start()
+                                }
+                            }
+                            videoViewRef = this
+                        }
+                    },
+                    update = { view ->
+                        videoViewRef = view
+                        if (isActive && !isUserPaused) {
+                            if (!view.isPlaying) {
+                                view.start()
+                            }
+                        } else {
+                            if (view.isPlaying) {
+                                view.pause()
                             }
                         }
-                        setOnErrorListener { _, _, _ ->
-                            // Handle media errors gracefully without crashing
-                            true
-                        }
-                        setOnCompletionListener {
-                            viewModel.onVideoCompleted(video.id)
-                            seekTo(0)
-                            if (!isUserPaused) {
-                                start()
-                            }
-                        }
-                        videoViewRef = this
-                    }
-                },
-                update = { view ->
-                    videoViewRef = view
-                    if (isActive && !isUserPaused) {
-                        if (!view.isPlaying) {
-                            view.start()
-                        }
-                    } else {
-                        if (view.isPlaying) {
-                            view.pause()
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+                    },
+                    modifier = Modifier.size(fitWidth, fitHeight)
+                )
+            }
         }
 
         // Subtle play icon indicator only when user explicitly tapped to pause

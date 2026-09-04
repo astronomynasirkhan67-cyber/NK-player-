@@ -59,7 +59,7 @@ data class MusicUiState(
     val videoPositionSec: Float = 0f,
     val isVideoFullscreen: Boolean = false,
     val selectedVideoTab: Int = 0, // 0 = Shorts, 1 = Long Videos, 2 = Favorites
-    val shortsThresholdSeconds: Int = 60,
+    val shortsThresholdSeconds: Int = 90,
     val isScanningMedia: Boolean = false,
     val scanStatusMessage: String? = null,
     val hasStoragePermission: Boolean = false
@@ -648,6 +648,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setShortsThreshold(seconds: Int) {
         _uiState.value = _uiState.value.copy(shortsThresholdSeconds = seconds)
+        scanLocalMedia(silent = true)
     }
 
     private var lastScanTimestamp: Long = 0L

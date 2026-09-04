@@ -130,7 +130,7 @@ fun StatsScreen(
                 SmallMetricCard(
                     label = "Shorts Reels",
                     value = "${stats.totalShortsCount}",
-                    subtext = "≤60s clips",
+                    subtext = "≤90s clips",
                     modifier = Modifier.weight(1f)
                 )
                 SmallMetricCard(

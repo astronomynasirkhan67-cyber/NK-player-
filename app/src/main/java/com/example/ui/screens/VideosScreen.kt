@@ -104,8 +104,13 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.data.model.VideoItem
+import com.example.ui.components.AspectFitVideoContainer
+import com.example.ui.components.AspectFitVideoView
+import com.example.ui.components.VideoDimensionHelper
 import com.example.ui.viewmodel.MusicViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * Information about audio or subtitle track detected in the video container.
@@ -119,7 +124,7 @@ data class VideoTrackOption(
 
 /**
  * Long Videos Section:
- * Exclusively for full-length videos and productions (> 60 seconds).
+ * Exclusively for full-length videos and productions (> 90 seconds).
  *
  * Supports:
  * - Fullscreen immersive player with aspect-ratio preservation (fit/contain)
@@ -138,12 +143,12 @@ fun VideosScreen(
     val longVideos by viewModel.longVideos.collectAsState()
     val favoriteVideos by viewModel.favoriteVideos.collectAsState()
 
-    // Filter long videos strictly for duration > 60 seconds
-    val filteredLongVideos = remember(longVideos) {
-        longVideos.filter { it.durationSeconds > 60 }
+    // Filter long videos strictly for duration > 90 seconds (1 minute 30 seconds)
+    val filteredLongVideos = remember(longVideos, uiState.shortsThresholdSeconds) {
+        longVideos.filter { it.durationSeconds > uiState.shortsThresholdSeconds }
     }
-    val filteredFavoriteLongVideos = remember(favoriteVideos) {
-        favoriteVideos.filter { it.durationSeconds > 60 }
+    val filteredFavoriteLongVideos = remember(favoriteVideos, uiState.shortsThresholdSeconds) {
+        favoriteVideos.filter { it.durationSeconds > uiState.shortsThresholdSeconds }
     }
 
     var searchQuery by remember { mutableStateOf("") }
@@ -196,7 +201,7 @@ fun VideosScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Full-length videos over 60s (${filteredLongVideos.size})",
+                            text = "Full-length videos over 90s (${filteredLongVideos.size})",
                             color = Color(0xFF00E5FF),
                             fontSize = 12.sp
                         )
@@ -344,13 +349,15 @@ fun LongVideosCatalogView(
     isFavoriteTab: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    val uiState by viewModel.uiState.collectAsState()
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // Active Player Card if a long video is selected
-        if (currentVideo != null && currentVideo.durationSeconds > 60) {
+        if (currentVideo != null && currentVideo.durationSeconds > uiState.shortsThresholdSeconds) {
             item(key = "active_player_card") {
                 ActiveLongVideoPlayerCard(
                     video = currentVideo,
@@ -403,7 +410,7 @@ fun LongVideosCatalogView(
                             text = if (isFavoriteTab) {
                                 "Tap the heart icon on any video to add it to your favorites."
                             } else {
-                                "Videos over 60 seconds stored in your device storage will appear here."
+                                "Videos over 90 seconds stored in your device storage will appear here."
                             },
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 12.sp,
@@ -463,6 +470,21 @@ fun ActiveLongVideoPlayerCard(
     var selectedAudioTrackIndex by remember { mutableIntStateOf(-1) }
     var mediaPlayerRef by remember { mutableStateOf<MediaPlayer?>(null) }
     var videoViewRef by remember { mutableStateOf<AspectFitVideoView?>(null) }
+    var videoRatio by remember(video.id) {
+        mutableStateOf<Float?>(VideoDimensionHelper.parseRatio(video.resolution))
+    }
+
+    LaunchedEffect(video.uri) {
+        withContext(Dispatchers.IO) {
+            val dims = VideoDimensionHelper.getDisplayDimensions(context, video.uri)
+            if (dims != null && dims.first > 0 && dims.second > 0) {
+                val ratio = dims.first.toFloat() / dims.second.toFloat()
+                withContext(Dispatchers.Main) {
+                    videoRatio = ratio
+                }
+            }
+        }
+    }
 
     Card(
         shape = RoundedCornerShape(18.dp),
@@ -471,7 +493,7 @@ fun ActiveLongVideoPlayerCard(
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Video Player View Container
+            // Video Player View Container with aspect-fit contain
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -480,45 +502,58 @@ fun ActiveLongVideoPlayerCard(
                     .testTag("active_video_container"),
                 contentAlignment = Alignment.Center
             ) {
-                if (video.uri.isNotBlank()) {
-                    AndroidView(
-                        factory = { ctx ->
-                            AspectFitVideoView(ctx).apply {
-                                layoutParams = ViewGroup.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    ViewGroup.LayoutParams.MATCH_PARENT
-                                )
-                                setVideoURI(Uri.parse(video.uri))
-                                setOnPreparedListener { mp ->
-                                    mediaPlayerRef = mp
-                                    mp.setOnVideoSizeChangedListener { _, w, h ->
-                                        updateVideoSize(w, h)
-                                    }
-                                    updateVideoSize(mp.videoWidth, mp.videoHeight)
-                                    // Detect audio and subtitle tracks
-                                    val (aTracks, sTracks) = inspectMediaTracks(mp)
-                                    detectedAudioTracks = aTracks
-                                    detectedSubtitleTracks = sTracks
+                AspectFitVideoContainer(
+                    videoRatio = videoRatio,
+                    modifier = Modifier.fillMaxSize()
+                ) { fitWidth, fitHeight ->
+                    if (video.uri.isNotBlank()) {
+                        AndroidView(
+                            factory = { ctx ->
+                                AspectFitVideoView(ctx).apply {
+                                    layoutParams = ViewGroup.LayoutParams(
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        ViewGroup.LayoutParams.MATCH_PARENT
+                                    )
+                                    setVideoURI(Uri.parse(video.uri))
+                                    setOnPreparedListener { mp ->
+                                        mediaPlayerRef = mp
+                                        mp.setOnVideoSizeChangedListener { _, w, h ->
+                                            if (w > 0 && h > 0) {
+                                                updateVideoSize(w, h)
+                                                if (videoRatio == null) {
+                                                    videoRatio = w.toFloat() / h.toFloat()
+                                                }
+                                            }
+                                        }
+                                        updateVideoSize(mp.videoWidth, mp.videoHeight)
+                                        if (videoRatio == null && mp.videoWidth > 0 && mp.videoHeight > 0) {
+                                            videoRatio = mp.videoWidth.toFloat() / mp.videoHeight.toFloat()
+                                        }
+                                        // Detect audio and subtitle tracks
+                                        val (aTracks, sTracks) = inspectMediaTracks(mp)
+                                        detectedAudioTracks = aTracks
+                                        detectedSubtitleTracks = sTracks
 
-                                    if (isPlaying) start()
+                                        if (isPlaying) start()
+                                    }
+                                    setOnErrorListener { _, _, _ -> true }
+                                    setOnCompletionListener {
+                                        viewModel.onVideoCompleted(video.id)
+                                    }
+                                    videoViewRef = this
                                 }
-                                setOnErrorListener { _, _, _ -> true }
-                                setOnCompletionListener {
-                                    viewModel.onVideoCompleted(video.id)
+                            },
+                            update = { view ->
+                                videoViewRef = view
+                                if (isPlaying) {
+                                    if (!view.isPlaying) view.start()
+                                } else {
+                                    if (view.isPlaying) view.pause()
                                 }
-                                videoViewRef = this
-                            }
-                        },
-                        update = { view ->
-                            videoViewRef = view
-                            if (isPlaying) {
-                                if (!view.isPlaying) view.start()
-                            } else {
-                                if (view.isPlaying) view.pause()
-                            }
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                            },
+                            modifier = Modifier.size(fitWidth, fitHeight)
+                        )
+                    }
                 }
 
                 // Top Overlay: Close, Rotation, and Fullscreen
@@ -886,6 +921,21 @@ fun FullscreenLongVideoPlayer(
     var selectedAudioTrackIndex by remember { mutableIntStateOf(-1) }
     var mediaPlayerRef by remember { mutableStateOf<MediaPlayer?>(null) }
     var videoViewRef by remember { mutableStateOf<AspectFitVideoView?>(null) }
+    var videoRatio by remember(video.id) {
+        mutableStateOf<Float?>(VideoDimensionHelper.parseRatio(video.resolution))
+    }
+
+    LaunchedEffect(video.uri) {
+        withContext(Dispatchers.IO) {
+            val dims = VideoDimensionHelper.getDisplayDimensions(context, video.uri)
+            if (dims != null && dims.first > 0 && dims.second > 0) {
+                val ratio = dims.first.toFloat() / dims.second.toFloat()
+                withContext(Dispatchers.Main) {
+                    videoRatio = ratio
+                }
+            }
+        }
+    }
 
     // Auto-hide controls after 3.5 seconds of playback
     LaunchedEffect(areControlsVisible, lastInteractionTime, isPlaying) {
@@ -929,46 +979,59 @@ fun FullscreenLongVideoPlayer(
             .testTag("fullscreen_video_player"),
         contentAlignment = Alignment.Center
     ) {
-        // Video View with aspect-fit contain behavior
-        if (video.uri.isNotBlank()) {
-            AndroidView(
-                factory = { ctx ->
-                    AspectFitVideoView(ctx).apply {
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        setVideoURI(Uri.parse(video.uri))
-                        setOnPreparedListener { mp ->
-                            mediaPlayerRef = mp
-                            mp.setOnVideoSizeChangedListener { _, w, h ->
-                                updateVideoSize(w, h)
-                            }
-                            updateVideoSize(mp.videoWidth, mp.videoHeight)
-                            val (aTracks, sTracks) = inspectMediaTracks(mp)
-                            detectedAudioTracks = aTracks
-                            detectedSubtitleTracks = sTracks
+        // Video View with aspect-fit contain behavior (never stretched, never cropped)
+        AspectFitVideoContainer(
+            videoRatio = videoRatio,
+            modifier = Modifier.fillMaxSize()
+        ) { fitWidth, fitHeight ->
+            if (video.uri.isNotBlank()) {
+                AndroidView(
+                    factory = { ctx ->
+                        AspectFitVideoView(ctx).apply {
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT
+                            )
+                            setVideoURI(Uri.parse(video.uri))
+                            setOnPreparedListener { mp ->
+                                mediaPlayerRef = mp
+                                mp.setOnVideoSizeChangedListener { _, w, h ->
+                                    if (w > 0 && h > 0) {
+                                        updateVideoSize(w, h)
+                                        if (videoRatio == null) {
+                                            videoRatio = w.toFloat() / h.toFloat()
+                                        }
+                                    }
+                                }
+                                updateVideoSize(mp.videoWidth, mp.videoHeight)
+                                if (videoRatio == null && mp.videoWidth > 0 && mp.videoHeight > 0) {
+                                    videoRatio = mp.videoWidth.toFloat() / mp.videoHeight.toFloat()
+                                }
+                                val (aTracks, sTracks) = inspectMediaTracks(mp)
+                                detectedAudioTracks = aTracks
+                                detectedSubtitleTracks = sTracks
 
-                            seekTo((currentPos * 1000).toInt())
-                            if (isPlaying) start()
+                                seekTo((currentPos * 1000).toInt())
+                                if (isPlaying) start()
+                            }
+                            setOnErrorListener { _, _, _ -> true }
+                            setOnCompletionListener {
+                                viewModel.onVideoCompleted(video.id)
+                            }
+                            videoViewRef = this
                         }
-                        setOnErrorListener { _, _, _ -> true }
-                        setOnCompletionListener {
-                            viewModel.onVideoCompleted(video.id)
+                    },
+                    update = { view ->
+                        videoViewRef = view
+                        if (isPlaying) {
+                            if (!view.isPlaying) view.start()
+                        } else {
+                            if (view.isPlaying) view.pause()
                         }
-                        videoViewRef = this
-                    }
-                },
-                update = { view ->
-                    videoViewRef = view
-                    if (isPlaying) {
-                        if (!view.isPlaying) view.start()
-                    } else {
-                        if (view.isPlaying) view.pause()
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+                    },
+                    modifier = Modifier.size(fitWidth, fitHeight)
+                )
+            }
         }
 
         // Overlay Controls

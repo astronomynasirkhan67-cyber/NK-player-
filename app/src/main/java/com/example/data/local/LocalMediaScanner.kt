@@ -175,7 +175,7 @@ class LocalMediaScanner(private val context: Context) {
         audioList
     }
 
-    suspend fun scanLocalVideos(shortsThresholdSeconds: Int = 60): List<VideoItem> = withContext(Dispatchers.IO) {
+    suspend fun scanLocalVideos(shortsThresholdSeconds: Int = 90): List<VideoItem> = withContext(Dispatchers.IO) {
         val videoList = mutableListOf<VideoItem>()
         val projection = arrayOf(
             MediaStore.Video.Media._ID,
@@ -249,6 +249,7 @@ class LocalMediaScanner(private val context: Context) {
                             id
                         ).toString()
 
+                        // Shorts up to 90 seconds (1m 30s)
                         val isShort = durationSec in 1..shortsThresholdSeconds
 
                         videoList.add(
