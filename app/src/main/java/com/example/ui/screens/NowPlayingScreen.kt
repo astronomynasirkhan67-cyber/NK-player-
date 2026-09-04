@@ -93,6 +93,7 @@ fun NowPlayingScreen(
     onOpenEqualizer: () -> Unit,
     onToggleLyrics: () -> Unit,
     onAddToPlaylist: (Song) -> Unit,
+    onMoreClick: ((Song) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val song = uiState.currentSong
@@ -286,6 +287,20 @@ fun NowPlayingScreen(
                             imageVector = if (song.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             contentDescription = "Favorite",
                             tint = if (song.isFavorite) Color(0xFFFF4081) else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // 3-Dot Options menu (Rename, Share, Move, Delete)
+                if (song != null && onMoreClick != null) {
+                    IconButton(
+                        onClick = { onMoreClick(song) },
+                        modifier = Modifier.testTag("now_playing_more_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "Song options",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }

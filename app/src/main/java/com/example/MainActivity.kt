@@ -68,6 +68,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.EqualizerDialog
 import com.example.ui.components.MiniPlayerBar
+import com.example.ui.components.DeleteMediaConfirmDialog
+import com.example.ui.components.MediaActionBottomSheet
+import com.example.ui.components.MoveMediaDialog
+import com.example.ui.components.RenameMediaDialog
+import com.example.data.local.MediaTarget
 import com.example.ui.screens.LibraryPlaylistsScreen
 import com.example.ui.screens.NowPlayingScreen
 import com.example.ui.screens.ShortsFeedScreen
@@ -75,6 +80,7 @@ import com.example.ui.screens.StatsScreen
 import com.example.ui.screens.ThemesSoundLabScreen
 import com.example.ui.screens.VideosScreen
 import com.example.ui.theme.MusicNasirKhanTheme
+import com.example.ui.viewmodel.MediaActionType
 import com.example.ui.viewmodel.MusicViewModel
 import com.example.ui.viewmodel.NavigationTab
 
@@ -431,7 +437,8 @@ class MainActivity : ComponentActivity() {
                                         onScratch = { viewModel.scratchTurntable() },
                                         onOpenEqualizer = { viewModel.toggleEqualizerDialog(true) },
                                         onToggleLyrics = { viewModel.toggleLyrics() },
-                                        onAddToPlaylist = { viewModel.setAddToPlaylistSong(it) }
+                                        onAddToPlaylist = { viewModel.setAddToPlaylistSong(it) },
+                                        onMoreClick = { viewModel.openMediaMenu(MediaTarget.SongMedia(it)) }
                                     )
                                 }
 
@@ -507,6 +514,56 @@ class MainActivity : ComponentActivity() {
                                 onSave = { viewModel.updateEqualizer(it) },
                                 onDismiss = { viewModel.toggleEqualizerDialog(false) }
                             )
+                        }
+
+                        // 3-Dot Media Management Bottom Sheet & Dialogs (Rename, Share, Move, Delete)
+                        val activeTarget = uiState.activeMediaTarget
+                        val activeAction = uiState.activeMediaAction
+                        if (activeTarget != null) {
+                            when (activeAction) {
+                                MediaActionType.MENU -> {
+                                    MediaActionBottomSheet(
+                                        target = activeTarget,
+                                        theme = uiState.currentTheme,
+                                        onDismiss = { viewModel.closeMediaAction() },
+                                        onRenameClick = { viewModel.openRenameDialog(activeTarget) },
+                                        onShareClick = { viewModel.performShare(this@MainActivity, activeTarget) },
+                                        onMoveClick = { viewModel.openMoveDialog(activeTarget) },
+                                        onDeleteClick = { viewModel.openDeleteDialog(activeTarget) }
+                                    )
+                                }
+                                MediaActionType.RENAME -> {
+                                    RenameMediaDialog(
+                                        target = activeTarget,
+                                        theme = uiState.currentTheme,
+                                        onDismiss = { viewModel.closeMediaAction() },
+                                        onConfirmRename = { newBaseName ->
+                                            viewModel.performRename(activeTarget, newBaseName)
+                                        }
+                                    )
+                                }
+                                MediaActionType.MOVE -> {
+                                    MoveMediaDialog(
+                                        target = activeTarget,
+                                        theme = uiState.currentTheme,
+                                        onDismiss = { viewModel.closeMediaAction() },
+                                        onConfirmMove = { destinationDir ->
+                                            viewModel.performMove(activeTarget, destinationDir)
+                                        }
+                                    )
+                                }
+                                MediaActionType.DELETE -> {
+                                    DeleteMediaConfirmDialog(
+                                        target = activeTarget,
+                                        theme = uiState.currentTheme,
+                                        onDismiss = { viewModel.closeMediaAction() },
+                                        onConfirmDelete = {
+                                            viewModel.performDelete(activeTarget)
+                                        }
+                                    )
+                                }
+                                null -> {}
+                            }
                         }
                     }
                 }

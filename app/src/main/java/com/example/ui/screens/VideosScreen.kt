@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
@@ -58,6 +59,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.VolumeOff
 import androidx.compose.material.icons.filled.VolumeUp
+import com.example.data.local.MediaTarget
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -438,7 +440,8 @@ fun LongVideosCatalogView(
                     isSelected = currentVideo?.id == video.id,
                     onClick = { viewModel.playVideo(video) },
                     onFavorite = { viewModel.toggleVideoFavorite(video) },
-                    onPlayAsAudio = { viewModel.playVideoAsAudio(video) }
+                    onPlayAsAudio = { viewModel.playVideoAsAudio(video) },
+                    onMoreClick = { viewModel.openMediaMenu(MediaTarget.VideoMedia(video)) }
                 )
             }
         }
@@ -848,6 +851,16 @@ fun ActiveLongVideoPlayerCard(
                                 modifier = Modifier.size(22.dp)
                             )
                         }
+
+                        // 3-dot More Options Trigger
+                        IconButton(onClick = { viewModel.openMediaMenu(MediaTarget.VideoMedia(video)) }) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "Options",
+                                tint = Color.White.copy(alpha = 0.8f),
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1143,6 +1156,21 @@ fun FullscreenLongVideoPlayer(
                             Icon(
                                 Icons.Default.ScreenRotation,
                                 contentDescription = "Toggle Orientation",
+                                tint = Color.White
+                            )
+                        }
+
+                        // 3-dot More Options Trigger
+                        IconButton(
+                            onClick = {
+                                lastInteractionTime = System.currentTimeMillis()
+                                viewModel.openMediaMenu(MediaTarget.VideoMedia(video))
+                            },
+                            modifier = Modifier.testTag("fullscreen_more_menu_btn")
+                        ) {
+                            Icon(
+                                Icons.Default.MoreVert,
+                                contentDescription = "Options",
                                 tint = Color.White
                             )
                         }
@@ -1705,7 +1733,8 @@ fun VideoListItemCard(
     isSelected: Boolean,
     onClick: () -> Unit,
     onFavorite: () -> Unit,
-    onPlayAsAudio: () -> Unit
+    onPlayAsAudio: () -> Unit,
+    onMoreClick: (() -> Unit)? = null
 ) {
     Card(
         shape = RoundedCornerShape(14.dp),
@@ -1798,6 +1827,19 @@ fun VideoListItemCard(
                     if (video.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                     contentDescription = "Favorite",
                     tint = if (video.isFavorite) Color(0xFFFF2A6D) else Color.White.copy(alpha = 0.4f),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // 3-dot More menu
+            IconButton(
+                onClick = { onMoreClick?.invoke() },
+                modifier = Modifier.testTag("list_more_${video.id}")
+            ) {
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = "Options",
+                    tint = Color.White.copy(alpha = 0.6f),
                     modifier = Modifier.size(20.dp)
                 )
             }

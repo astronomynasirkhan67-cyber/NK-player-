@@ -55,6 +55,15 @@ interface SongDao {
 
     @Query("DELETE FROM songs WHERE id IN (:ids)")
     suspend fun deleteSongsByIds(ids: List<String>)
+
+    @Query("DELETE FROM songs WHERE id = :id")
+    suspend fun deleteSongById(id: String)
+
+    @Query("UPDATE songs SET title = :newTitle, uri = :newUri WHERE id = :id")
+    suspend fun updateSongTitleAndUri(id: String, newTitle: String, newUri: String)
+
+    @Query("UPDATE songs SET title = :newTitle WHERE id = :id")
+    suspend fun updateSongTitle(id: String, newTitle: String)
 }
 
 @Dao
@@ -106,6 +115,15 @@ interface VideoDao {
 
     @Query("DELETE FROM videos WHERE id IN (:ids)")
     suspend fun deleteVideosByIds(ids: List<String>)
+
+    @Query("DELETE FROM videos WHERE id = :id")
+    suspend fun deleteVideoById(id: String)
+
+    @Query("UPDATE videos SET title = :newTitle, uri = :newUri WHERE id = :id")
+    suspend fun updateVideoTitleAndUri(id: String, newTitle: String, newUri: String)
+
+    @Query("UPDATE videos SET title = :newTitle WHERE id = :id")
+    suspend fun updateVideoTitle(id: String, newTitle: String)
 }
 
 @Dao

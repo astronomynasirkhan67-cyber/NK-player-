@@ -1,11 +1,15 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.content.Context
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.MusicAudioEngine
 import com.example.data.local.AppDatabase
 import com.example.data.local.LocalMediaScanner
+import com.example.data.local.MediaFileManager
+import com.example.data.local.MediaTarget
 import com.example.data.model.AppTheme
 import com.example.data.model.EqualizerSettings
 import com.example.data.model.OverallStatistics
@@ -14,6 +18,7 @@ import com.example.data.model.Playlist
 import com.example.data.model.Song
 import com.example.data.model.VideoItem
 import com.example.data.repository.MusicRepository
+import java.io.File
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +36,13 @@ enum class RepeatMode {
 
 enum class NavigationTab {
     NOW_PLAYING, PLAYLISTS, SHORTS, VIDEOS, STATS, THEMES_LAB
+}
+
+enum class MediaActionType {
+    MENU,
+    RENAME,
+    MOVE,
+    DELETE
 }
 
 data class MusicUiState(
@@ -62,7 +74,11 @@ data class MusicUiState(
     val shortsThresholdSeconds: Int = 90,
     val isScanningMedia: Boolean = false,
     val scanStatusMessage: String? = null,
-    val hasStoragePermission: Boolean = false
+    val hasStoragePermission: Boolean = false,
+    // Media management state
+    val activeMediaTarget: MediaTarget? = null,
+    val activeMediaAction: MediaActionType? = null,
+    val userFeedbackMessage: String? = null
 )
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
@@ -707,6 +723,176 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun clearHistory() {
         viewModelScope.launch {
             repository.clearHistory()
+        }
+    }
+
+    // ==================== 3-DOT MEDIA MANAGEMENT ====================
+
+    fun openMediaMenu(target: MediaTarget) {
+        _uiState.value = _uiState.value.copy(
+            activeMediaTarget = target,
+            activeMediaAction = MediaActionType.MENU
+        )
+    }
+
+    fun openRenameDialog(target: MediaTarget) {
+        _uiState.value = _uiState.value.copy(
+            activeMediaTarget = target,
+            activeMediaAction = MediaActionType.RENAME
+        )
+    }
+
+    fun openMoveDialog(target: MediaTarget) {
+        _uiState.value = _uiState.value.copy(
+            activeMediaTarget = target,
+            activeMediaAction = MediaActionType.MOVE
+        )
+    }
+
+    fun openDeleteDialog(target: MediaTarget) {
+        _uiState.value = _uiState.value.copy(
+            activeMediaTarget = target,
+            activeMediaAction = MediaActionType.DELETE
+        )
+    }
+
+    fun closeMediaAction() {
+        _uiState.value = _uiState.value.copy(
+            activeMediaTarget = null,
+            activeMediaAction = null
+        )
+    }
+
+    fun clearFeedbackMessage() {
+        _uiState.value = _uiState.value.copy(userFeedbackMessage = null)
+    }
+
+    fun performRename(target: MediaTarget, newBaseName: String) {
+        val app = getApplication<Application>()
+        val result = MediaFileManager.renameMedia(app, target, newBaseName)
+        result.onSuccess { res ->
+            viewModelScope.launch {
+                when (target) {
+                    is MediaTarget.SongMedia -> {
+                        repository.updateSongTitleAndUri(target.song.id, res.newTitle, res.newUri)
+                        if (_uiState.value.currentSong?.id == target.song.id) {
+                            _uiState.value = _uiState.value.copy(
+                                currentSong = _uiState.value.currentSong?.copy(
+                                    title = res.newTitle,
+                                    uri = res.newUri
+                                )
+                            )
+                        }
+                    }
+                    is MediaTarget.VideoMedia -> {
+                        repository.updateVideoTitleAndUri(target.video.id, res.newTitle, res.newUri)
+                        if (_uiState.value.currentVideo?.id == target.video.id) {
+                            _uiState.value = _uiState.value.copy(
+                                currentVideo = _uiState.value.currentVideo?.copy(
+                                    title = res.newTitle,
+                                    uri = res.newUri
+                                )
+                            )
+                        }
+                    }
+                }
+                val msg = "Renamed successfully to ${res.newFileName}"
+                Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
+                _uiState.value = _uiState.value.copy(
+                    activeMediaTarget = null,
+                    activeMediaAction = null,
+                    userFeedbackMessage = msg
+                )
+            }
+        }.onFailure { ex ->
+            val errorMsg = "Rename failed: ${ex.localizedMessage ?: "Unknown error"}"
+            Toast.makeText(app, errorMsg, Toast.LENGTH_LONG).show()
+            _uiState.value = _uiState.value.copy(userFeedbackMessage = errorMsg)
+        }
+    }
+
+    fun performShare(context: Context, target: MediaTarget) {
+        MediaFileManager.shareMedia(context, target)
+        closeMediaAction()
+    }
+
+    fun performMove(target: MediaTarget, destinationDir: File) {
+        val app = getApplication<Application>()
+        val result = MediaFileManager.moveMedia(app, target, destinationDir)
+        result.onSuccess { res ->
+            viewModelScope.launch {
+                when (target) {
+                    is MediaTarget.SongMedia -> {
+                        repository.updateSongTitleAndUri(target.song.id, target.song.title, res.newUri)
+                        if (_uiState.value.currentSong?.id == target.song.id) {
+                            _uiState.value = _uiState.value.copy(
+                                currentSong = _uiState.value.currentSong?.copy(uri = res.newUri)
+                            )
+                        }
+                    }
+                    is MediaTarget.VideoMedia -> {
+                        repository.updateVideoTitleAndUri(target.video.id, target.video.title, res.newUri)
+                        if (_uiState.value.currentVideo?.id == target.video.id) {
+                            _uiState.value = _uiState.value.copy(
+                                currentVideo = _uiState.value.currentVideo?.copy(uri = res.newUri)
+                            )
+                        }
+                    }
+                }
+                val msg = "Moved successfully to ${res.destinationFolderName}"
+                Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
+                _uiState.value = _uiState.value.copy(
+                    activeMediaTarget = null,
+                    activeMediaAction = null,
+                    userFeedbackMessage = msg
+                )
+            }
+        }.onFailure { ex ->
+            val errorMsg = "Move failed: ${ex.localizedMessage ?: "Unknown error"}"
+            Toast.makeText(app, errorMsg, Toast.LENGTH_LONG).show()
+            _uiState.value = _uiState.value.copy(userFeedbackMessage = errorMsg)
+        }
+    }
+
+    fun performDelete(target: MediaTarget) {
+        val app = getApplication<Application>()
+        // If current song is being deleted, stop playback
+        if (target is MediaTarget.SongMedia && _uiState.value.currentSong?.id == target.song.id) {
+            audioEngine.stop()
+            _uiState.value = _uiState.value.copy(
+                currentSong = null,
+                isPlaying = false,
+                currentPositionSec = 0f
+            )
+        }
+        // If current video is being deleted, close video player
+        if (target is MediaTarget.VideoMedia && _uiState.value.currentVideo?.id == target.video.id) {
+            closeVideoPlayer()
+        }
+
+        val result = MediaFileManager.deleteMedia(app, target)
+        result.onSuccess {
+            viewModelScope.launch {
+                when (target) {
+                    is MediaTarget.SongMedia -> {
+                        repository.deleteSong(target.song.id)
+                    }
+                    is MediaTarget.VideoMedia -> {
+                        repository.deleteVideo(target.video.id)
+                    }
+                }
+                val msg = "Deleted \"${target.title}\" successfully"
+                Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
+                _uiState.value = _uiState.value.copy(
+                    activeMediaTarget = null,
+                    activeMediaAction = null,
+                    userFeedbackMessage = msg
+                )
+            }
+        }.onFailure { ex ->
+            val errorMsg = "Delete failed: ${ex.localizedMessage ?: "Unknown error"}"
+            Toast.makeText(app, errorMsg, Toast.LENGTH_LONG).show()
+            _uiState.value = _uiState.value.copy(userFeedbackMessage = errorMsg)
         }
     }
 

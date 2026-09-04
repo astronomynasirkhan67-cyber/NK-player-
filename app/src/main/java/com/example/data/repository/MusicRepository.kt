@@ -142,6 +142,31 @@ class MusicRepository(
         playlistDao.removeSongFromPlaylist(playlistId, songId)
     }
 
+    suspend fun deleteSong(songId: String) {
+        songDao.deleteSongById(songId)
+        playlistDao.cleanupOrphanedPlaylistSongs()
+    }
+
+    suspend fun updateSongTitle(songId: String, newTitle: String) {
+        songDao.updateSongTitle(songId, newTitle)
+    }
+
+    suspend fun updateSongTitleAndUri(songId: String, newTitle: String, newUri: String) {
+        songDao.updateSongTitleAndUri(songId, newTitle, newUri)
+    }
+
+    suspend fun deleteVideo(videoId: String) {
+        videoDao.deleteVideoById(videoId)
+    }
+
+    suspend fun updateVideoTitle(videoId: String, newTitle: String) {
+        videoDao.updateVideoTitle(videoId, newTitle)
+    }
+
+    suspend fun updateVideoTitleAndUri(videoId: String, newTitle: String, newUri: String) {
+        videoDao.updateVideoTitleAndUri(videoId, newTitle, newUri)
+    }
+
     suspend fun ensureInitialData() {
         // Purge any legacy demo or placeholder media
         try {

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FolderSpecial
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistAdd
@@ -37,6 +38,7 @@ import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Whatshot
+import com.example.data.local.MediaTarget
 import coil.compose.AsyncImage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -146,6 +148,9 @@ fun LibraryPlaylistsScreen(
                 },
                 onDeletePlaylist = {
                     viewModel.deletePlaylist(selectedPlaylistId)
+                },
+                onMoreClick = { song ->
+                    viewModel.openMediaMenu(MediaTarget.SongMedia(song))
                 }
             )
         } else {
@@ -458,7 +463,8 @@ fun LibraryPlaylistsScreen(
                             theme = uiState.currentTheme,
                             onClick = { onPlaySong(song, filteredSongs) },
                             onToggleFavorite = { viewModel.toggleFavorite(song) },
-                            onAddToPlaylist = { viewModel.setAddToPlaylistSong(song) }
+                            onAddToPlaylist = { viewModel.setAddToPlaylistSong(song) },
+                            onMoreClick = { viewModel.openMediaMenu(MediaTarget.SongMedia(song)) }
                         )
                     }
                 }
@@ -750,7 +756,8 @@ fun SongListItem(
     theme: AppTheme,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
-    onAddToPlaylist: () -> Unit
+    onAddToPlaylist: () -> Unit,
+    onMoreClick: (() -> Unit)? = null
 ) {
     val primaryColor = Color(theme.primaryHex)
     val coverDrawableId = when (song.coverResName) {
@@ -886,6 +893,23 @@ fun SongListItem(
                     modifier = Modifier.size(20.dp)
                 )
             }
+
+            // 3-Dot Options Button
+            if (onMoreClick != null) {
+                IconButton(
+                    onClick = onMoreClick,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .testTag("song_more_menu_${song.id}")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Song options",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -901,7 +925,8 @@ fun PlaylistDetailView(
     onPlaySong: (Song) -> Unit,
     onToggleFavorite: (Song) -> Unit,
     onRemoveFromPlaylist: (Song) -> Unit,
-    onDeletePlaylist: () -> Unit
+    onDeletePlaylist: () -> Unit,
+    onMoreClick: ((Song) -> Unit)? = null
 ) {
     val primaryColor = Color(theme.primaryHex)
 
@@ -1024,6 +1049,20 @@ fun PlaylistDetailView(
                                     Icon(
                                         imageVector = Icons.Default.Delete,
                                         contentDescription = "Remove",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            // 3-Dot Options
+                            if (onMoreClick != null) {
+                                IconButton(
+                                    onClick = { onMoreClick(song) },
+                                    modifier = Modifier.testTag("pl_song_more_${song.id}")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MoreVert,
+                                        contentDescription = "Song options",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
