@@ -16,10 +16,13 @@ class ExampleUnitTest {
   @Test
   fun testNavigationTabsContainShortsAndVideos() {
     val tabs = NavigationTab.values().map { it.name }
-    assertTrue("Should include SHORTS tab", tabs.contains("SHORTS"))
-    assertTrue("Should include VIDEOS tab", tabs.contains("VIDEOS"))
-    assertTrue("Should include NOW_PLAYING tab", tabs.contains("NOW_PLAYING"))
-    assertTrue("Should include PLAYLISTS tab", tabs.contains("PLAYLISTS"))
+    assertEquals(6, tabs.size)
+    assertTrue("Should include NOW_PLAYING tab (Player)", tabs.contains("NOW_PLAYING"))
+    assertTrue("Should include PLAYLISTS tab (Music)", tabs.contains("PLAYLISTS"))
+    assertTrue("Should include SHORTS tab (Shorts)", tabs.contains("SHORTS"))
+    assertTrue("Should include VIDEOS tab (Videos)", tabs.contains("VIDEOS"))
+    assertTrue("Should include STATS tab (Stats)", tabs.contains("STATS"))
+    assertTrue("Should include THEMES_LAB tab (Themes)", tabs.contains("THEMES_LAB"))
   }
 
   @Test

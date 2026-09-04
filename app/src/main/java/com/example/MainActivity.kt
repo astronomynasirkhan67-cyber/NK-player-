@@ -133,10 +133,14 @@ class MainActivity : ComponentActivity() {
             }
 
             MusicNasirKhanTheme(appTheme = uiState.currentTheme) {
-                val isImmersive = uiState.currentTab == NavigationTab.SHORTS || (uiState.currentTab == NavigationTab.VIDEOS && uiState.isVideoFullscreen)
+                val isImmersive = uiState.currentTab == NavigationTab.VIDEOS && uiState.isVideoFullscreen
 
                 BackHandler(enabled = uiState.isVideoFullscreen) {
                     viewModel.setVideoFullscreen(false)
+                }
+
+                BackHandler(enabled = !uiState.isVideoFullscreen && uiState.currentTab != NavigationTab.NOW_PLAYING) {
+                    viewModel.setTab(NavigationTab.NOW_PLAYING)
                 }
 
                 Surface(
