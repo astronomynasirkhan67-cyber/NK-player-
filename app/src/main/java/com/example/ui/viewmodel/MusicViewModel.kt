@@ -7,6 +7,8 @@ import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.MusicAudioEngine
+import com.example.audio.MusicPlaybackListener
+import com.example.audio.MusicPlaybackService
 import com.example.data.local.AppDatabase
 import com.example.data.local.LocalMediaScanner
 import com.example.data.local.MediaDeleteResult
@@ -80,7 +82,12 @@ data class MusicUiState(
     // Media management state
     val activeMediaTarget: MediaTarget? = null,
     val activeMediaAction: MediaActionType? = null,
-    val userFeedbackMessage: String? = null
+    val userFeedbackMessage: String? = null,
+    // Shorts state
+    val shortsCurrentIndex: Int = 0,
+    val lastViewedShortId: String? = null,
+    val isShortsAutoScrollEnabled: Boolean = false,
+    val isShortsMuted: Boolean = false
 )
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
@@ -239,6 +246,38 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
+        // Connect background playback service callbacks
+        MusicPlaybackService.listener = object : MusicPlaybackListener {
+            override fun onPlay() {
+                if (!_uiState.value.isPlaying) {
+                    togglePlayPause()
+                }
+            }
+
+            override fun onPause() {
+                if (_uiState.value.isPlaying) {
+                    togglePlayPause()
+                }
+            }
+
+            override fun onNext() {
+                skipNext()
+            }
+
+            override fun onPrev() {
+                skipPrevious()
+            }
+
+            override fun onSeek(positionSec: Float) {
+                seekTo(positionSec)
+            }
+
+            override fun onStop() {
+                audioEngine.pause()
+                audioEngine.seekTo(0f)
+            }
+        }
+
         // Collect audio engine states
         viewModelScope.launch {
             audioEngine.isPlaying.collect { isPlaying ->
@@ -247,6 +286,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     startListeningTracker()
                 } else {
                     stopListeningTracker()
+                }
+
+                val song = _uiState.value.currentSong
+                if (song != null) {
+                    MusicPlaybackService.startOrUpdate(
+                        application,
+                        song,
+                        isPlaying,
+                        _uiState.value.currentPositionSec,
+                        _uiState.value.playbackSpeed
+                    )
                 }
             }
         }
@@ -533,9 +583,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playVideo(video: VideoItem) {
-        // Pause music playback when video plays
+        // Pause music playback and stop background music service when video plays
         if (_uiState.value.isPlaying) {
             audioEngine.pause()
+            MusicPlaybackService.stop(getApplication())
         }
 
         _uiState.value = _uiState.value.copy(
@@ -960,11 +1011,42 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // ==================== SHORTS METHODS ====================
+
+    fun setShortsCurrentIndex(index: Int, videoId: String? = null) {
+        _uiState.value = _uiState.value.copy(
+            shortsCurrentIndex = index.coerceAtLeast(0),
+            lastViewedShortId = videoId ?: _uiState.value.lastViewedShortId
+        )
+    }
+
+    fun toggleShortsAutoScroll() {
+        val newState = !_uiState.value.isShortsAutoScrollEnabled
+        _uiState.value = _uiState.value.copy(isShortsAutoScrollEnabled = newState)
+    }
+
+    fun setShortsAutoScroll(enabled: Boolean) {
+        _uiState.value = _uiState.value.copy(isShortsAutoScrollEnabled = enabled)
+    }
+
+    fun toggleShortsMute() {
+        val newState = !_uiState.value.isShortsMuted
+        _uiState.value = _uiState.value.copy(isShortsMuted = newState)
+    }
+
+    fun setShortsMuted(muted: Boolean) {
+        _uiState.value = _uiState.value.copy(isShortsMuted = muted)
+    }
+
     override fun onCleared() {
         super.onCleared()
         audioEngine.stop()
         sleepTimerJob?.cancel()
         songListeningJob?.cancel()
         videoWatchJob?.cancel()
+        MusicPlaybackService.listener = null
+        if (!_uiState.value.isPlaying) {
+            MusicPlaybackService.stop(getApplication())
+        }
     }
 }

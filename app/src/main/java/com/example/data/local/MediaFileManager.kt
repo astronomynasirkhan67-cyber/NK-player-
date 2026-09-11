@@ -290,7 +290,7 @@ object MediaFileManager {
             type = mimeType
             putExtra(Intent.EXTRA_STREAM, shareUri)
             putExtra(Intent.EXTRA_SUBJECT, item.title)
-            putExtra(Intent.EXTRA_TEXT, "Shared from Music Nasir Khan: ${item.title}")
+            putExtra(Intent.EXTRA_TEXT, "Shared from NK Player: ${item.title}")
             clipData = ClipData.newUri(context.contentResolver, item.title, shareUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
@@ -341,11 +341,11 @@ object MediaFileManager {
         // 2. App-specific storage (always 100% writable on all Android versions)
         context.getExternalFilesDir(Environment.DIRECTORY_MUSIC)?.let { appMusic ->
             if (!appMusic.exists()) appMusic.mkdirs()
-            folders.add(FolderDestination("App Music Vault", appMusic, "Nasir Khan Music Vault", "MUSIC"))
+            folders.add(FolderDestination("App Music Vault", appMusic, "NK Player Music Vault", "MUSIC"))
         }
         context.getExternalFilesDir(Environment.DIRECTORY_MOVIES)?.let { appMovies ->
             if (!appMovies.exists()) appMovies.mkdirs()
-            folders.add(FolderDestination("App Videos Vault", appMovies, "Nasir Khan Videos Vault", "MOVIES"))
+            folders.add(FolderDestination("App Videos Vault", appMovies, "NK Player Videos Vault", "MOVIES"))
         }
 
         return folders

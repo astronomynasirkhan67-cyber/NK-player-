@@ -5,7 +5,7 @@ import androidx.compose.runtime.Composable
 import com.example.data.model.AppTheme
 
 @Composable
-fun MusicNasirKhanTheme(
+fun NKPlayerTheme(
     appTheme: AppTheme = AppTheme.IMMERSIVE_UI,
     content: @Composable () -> Unit
 ) {
@@ -16,3 +16,9 @@ fun MusicNasirKhanTheme(
         content = content
     )
 }
+
+@Composable
+fun MusicNasirKhanTheme(
+    appTheme: AppTheme = AppTheme.IMMERSIVE_UI,
+    content: @Composable () -> Unit
+) = NKPlayerTheme(appTheme = appTheme, content = content)

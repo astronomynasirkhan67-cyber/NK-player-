@@ -24,7 +24,7 @@ class GreetingScreenshotTest {
   fun greeting_screenshot() {
     composeTestRule.setContent {
       MusicNasirKhanTheme {
-        Text("Music for Nasir")
+        Text("NK Player")
       }
     }
 

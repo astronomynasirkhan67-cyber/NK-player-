@@ -1,34 +1,45 @@
 package com.example.ui.screens
 
+import android.media.MediaPlayer
 import android.net.Uri
 import android.view.ViewGroup
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Autorenew
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PauseCircleOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
-import com.example.data.local.MediaTarget
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -39,6 +50,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -52,26 +64,28 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.data.local.MediaTarget
 import com.example.data.model.VideoItem
 import com.example.ui.components.AspectFitVideoContainer
 import com.example.ui.components.AspectFitVideoView
 import com.example.ui.components.VideoDimensionHelper
 import com.example.ui.viewmodel.MusicViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
 /**
- * Pure Vertical Shorts / Reels Feed.
+ * Pure Vertical Shorts / Reels Feed for NK Player.
  *
  * Requirements:
- * - NO large top header, search bar, or tabs
- * - NO video title, filename, "Device Video", duration badge, or watch-time text
- * - NO comments, share button, or unnecessary controls
- * - RESTORED: ❤️ Favorite / Heart (functional toggle) & 👁️ Views / View count
+ * - Preserves scroll position & last-viewed short across tab navigation and switches
+ * - Toggleable Auto-Scroll feature: "Auto Scroll: ON" / "Auto Scroll: OFF" with intelligent timing
+ * - Immediate clean stop of playback and resources on exit / swipe to avoid duplicate audio
+ * - Interactive Mute / Unmute toggle for audio control
+ * - Right-side floating controls: ❤️ Favorite, 👁️ Views Count, and ⋮ More Options
  * - Strictly filters for videos with duration <= 90 seconds (1 minute 30 seconds)
- * - Original aspect ratio strictly preserved (fit/contain, never stretched, never cropped)
- * - Automatic playback from beginning on swipe
- * - Immediate resource release on page change
+ * - Original aspect ratio strictly preserved (fit/contain, never stretched or cropped)
  */
 @Composable
 fun ShortsFeedScreen(
@@ -100,7 +114,7 @@ fun ShortsFeedScreen(
             .testTag("shorts_fullscreen_feed")
     ) {
         if (validShorts.isEmpty()) {
-            // Clean empty state when no shorts (<= 90s) exist on device
+            // Clean empty state when no shorts exist on device
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -154,15 +168,74 @@ fun ShortsFeedScreen(
                 }
             }
         } else {
-            val pagerState = rememberPagerState(pageCount = { validShorts.size })
+            // Restore scroll position: find last viewed index or default to saved index
+            val initialPage = remember(validShorts) {
+                val targetId = uiState.lastViewedShortId
+                val indexById = if (targetId != null) {
+                    validShorts.indexOfFirst { it.id == targetId }.takeIf { it >= 0 }
+                } else null
+                (indexById ?: uiState.shortsCurrentIndex).coerceIn(0, validShorts.size - 1)
+            }
 
+            val pagerState = rememberPagerState(
+                initialPage = initialPage,
+                pageCount = { validShorts.size }
+            )
+
+            // Track user paused state per active short
+            var isCurrentShortPaused by remember { mutableStateOf(false) }
+            var completionTrigger by remember { mutableLongStateOf(0L) }
+
+            // Sync active page with ViewModel state to preserve location across tabs
             LaunchedEffect(pagerState.currentPage) {
+                isCurrentShortPaused = false
                 val activeVideo = validShorts.getOrNull(pagerState.currentPage)
                 if (activeVideo != null) {
+                    viewModel.setShortsCurrentIndex(pagerState.currentPage, activeVideo.id)
                     viewModel.playVideo(activeVideo)
                 }
             }
 
+            // Intelligent Auto-Scroll Handler:
+            // Advances when the current Short finishes, or at an appropriate viewing duration.
+            // Avoids rapid skipping, resets cleanly on manual swipe, and respects pause state.
+            LaunchedEffect(
+                pagerState.currentPage,
+                uiState.isShortsAutoScrollEnabled,
+                isCurrentShortPaused,
+                completionTrigger
+            ) {
+                if (!uiState.isShortsAutoScrollEnabled || isCurrentShortPaused || validShorts.isEmpty()) {
+                    return@LaunchedEffect
+                }
+
+                val currentVideo = validShorts.getOrNull(pagerState.currentPage) ?: return@LaunchedEffect
+
+                val delayMillis = if (completionTrigger > 0L) {
+                    // Video natural completion occurred: give a gentle 500ms transition buffer
+                    500L
+                } else {
+                    // Video playing: wait until duration + 1s, with safe boundaries
+                    val durSec = currentVideo.durationSeconds
+                    if (durSec > 0) {
+                        ((durSec + 1L) * 1000L).coerceIn(8_000L, 90_000L)
+                    } else {
+                        10_000L
+                    }
+                }
+
+                delay(delayMillis)
+
+                if (isActive && uiState.isShortsAutoScrollEnabled && !isCurrentShortPaused) {
+                    val nextPage = (pagerState.currentPage + 1) % validShorts.size
+                    pagerState.animateScrollToPage(
+                        nextPage,
+                        animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing)
+                    )
+                }
+            }
+
+            // Vertical Pager
             VerticalPager(
                 state = pagerState,
                 modifier = Modifier
@@ -177,8 +250,117 @@ fun ShortsFeedScreen(
                 ShortVideoPage(
                     video = video,
                     isActive = isActive,
-                    viewModel = viewModel
+                    isMuted = uiState.isShortsMuted,
+                    viewModel = viewModel,
+                    isUserPaused = if (isActive) isCurrentShortPaused else false,
+                    onToggleUserPause = {
+                        if (isActive) {
+                            isCurrentShortPaused = !isCurrentShortPaused
+                        }
+                    },
+                    onVideoCompleted = {
+                        completionTrigger = System.currentTimeMillis()
+                    }
                 )
+            }
+
+            // Sleek, Non-Intrusive Top Overlay:
+            // 1. Position badge: Shorts X/Y
+            // 2. Mute / Unmute quick toggle
+            // 3. Auto Scroll toggle: "Auto Scroll: ON" / "Auto Scroll: OFF"
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .align(Alignment.TopCenter),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Short index counter badge
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = Color.Black.copy(alpha = 0.60f),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Shorts ${pagerState.currentPage + 1}/${validShorts.size}",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Mute / Unmute Button
+                    Surface(
+                        shape = CircleShape,
+                        color = if (uiState.isShortsMuted) Color(0xFFFF5252).copy(alpha = 0.85f) else Color.Black.copy(alpha = 0.60f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (uiState.isShortsMuted) Color(0xFFFF5252) else Color.White.copy(alpha = 0.20f)
+                        ),
+                        modifier = Modifier
+                            .clickable { viewModel.toggleShortsMute() }
+                            .testTag("shorts_mute_toggle")
+                    ) {
+                        Box(modifier = Modifier.size(34.dp), contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (uiState.isShortsMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                                contentDescription = if (uiState.isShortsMuted) "Unmute Audio" else "Mute Audio",
+                                tint = Color.White,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                    }
+
+                    // Auto Scroll Toggle Button ("Auto Scroll: ON" / "Auto Scroll: OFF")
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = if (uiState.isShortsAutoScrollEnabled) Color(0xFF00E5FF) else Color.Black.copy(alpha = 0.60f),
+                        border = BorderStroke(
+                            1.dp,
+                            if (uiState.isShortsAutoScrollEnabled) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.25f)
+                        ),
+                        modifier = Modifier
+                            .clickable { viewModel.toggleShortsAutoScroll() }
+                            .testTag("shorts_auto_scroll_toggle")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (uiState.isShortsAutoScrollEnabled) Icons.Default.Autorenew else Icons.Default.PauseCircleOutline,
+                                contentDescription = "Auto Scroll Mode",
+                                tint = if (uiState.isShortsAutoScrollEnabled) Color.Black else Color.White,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(
+                                text = if (uiState.isShortsAutoScrollEnabled) "Auto Scroll: ON" else "Auto Scroll: OFF",
+                                color = if (uiState.isShortsAutoScrollEnabled) Color.Black else Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -188,17 +370,22 @@ fun ShortsFeedScreen(
  * Individual Short Video Item:
  * Fits the original video without stretching or cropping (fit/contain).
  * Preserves exact aspect ratio (portrait, landscape, square) with letterboxing/pillarboxing.
- * Features restored ❤️ Favorite and 👁️ Views count controls.
+ * Clean audio management respecting mute preference and stopping cleanly on exit.
+ * Features restored ❤️ Favorite, 👁️ Views count, and ⋮ More options.
  */
 @Composable
 private fun ShortVideoPage(
     video: VideoItem,
     isActive: Boolean,
-    viewModel: MusicViewModel
+    isMuted: Boolean,
+    viewModel: MusicViewModel,
+    isUserPaused: Boolean,
+    onToggleUserPause: () -> Unit,
+    onVideoCompleted: () -> Unit
 ) {
     val context = LocalContext.current
-    var isUserPaused by remember(video.id) { mutableStateOf(false) }
     var videoViewRef by remember { mutableStateOf<AspectFitVideoView?>(null) }
+    var mediaPlayerRef by remember { mutableStateOf<MediaPlayer?>(null) }
     var videoRatio by remember(video.id) {
         mutableStateOf<Float?>(VideoDimensionHelper.parseRatio(video.resolution))
     }
@@ -216,14 +403,24 @@ private fun ShortVideoPage(
         }
     }
 
-    // When page is swiped away, release underlying playback resources immediately
+    // Handle mute / unmute dynamics
+    LaunchedEffect(isMuted) {
+        try {
+            val vol = if (isMuted) 0f else 1f
+            mediaPlayerRef?.setVolume(vol, vol)
+        } catch (_: Exception) {}
+    }
+
+    // When page is swiped away or unmounted, release underlying playback resources immediately
     DisposableEffect(video.id, isActive) {
         if (!isActive) {
             videoViewRef?.stopPlayback()
+            mediaPlayerRef = null
         }
         onDispose {
             videoViewRef?.stopPlayback()
             videoViewRef = null
+            mediaPlayerRef = null
         }
     }
 
@@ -232,14 +429,13 @@ private fun ShortVideoPage(
             .fillMaxSize()
             .background(Color.Black)
             .clickable {
+                onToggleUserPause()
                 videoViewRef?.let { vv ->
                     if (vv.isPlaying) {
                         vv.pause()
-                        isUserPaused = true
                         viewModel.pauseVideo()
                     } else {
                         vv.start()
-                        isUserPaused = false
                         viewModel.resumeVideo()
                     }
                 }
@@ -261,7 +457,10 @@ private fun ShortVideoPage(
                             )
                             setVideoURI(Uri.parse(video.uri))
                             setOnPreparedListener { mp ->
-                                mp.isLooping = true
+                                mediaPlayerRef = mp
+                                val vol = if (isMuted) 0f else 1f
+                                mp.setVolume(vol, vol)
+                                mp.isLooping = false
                                 mp.setOnVideoSizeChangedListener { _, w, h ->
                                     if (w > 0 && h > 0) {
                                         updateVideoSize(w, h)
@@ -285,6 +484,7 @@ private fun ShortVideoPage(
                             }
                             setOnCompletionListener {
                                 viewModel.onVideoCompleted(video.id)
+                                onVideoCompleted()
                                 seekTo(0)
                                 if (!isUserPaused) {
                                     start()
@@ -333,7 +533,7 @@ private fun ShortVideoPage(
             }
         }
 
-        // Restored Right-Side Floating Controls: ❤️ Favorite and 👁️ Views Count
+        // Right-Side Floating Controls: ❤️ Favorite, 👁️ Views Count, and ⋮ More Options
         Column(
             modifier = Modifier
                 .align(Alignment.BottomEnd)

@@ -444,7 +444,7 @@ fun ThemesSoundLabScreen(
             }
         }
 
-        // About Music for Nasir Card
+        // About NK Player Card
         item {
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -463,13 +463,13 @@ fun ThemesSoundLabScreen(
                             modifier = Modifier.size(18.dp)
                         )
                         Text(
-                            text = "Music for Nasir",
+                            text = "NK Player",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp
                         )
                     }
                     Text(
-                        text = "Complete multimedia suite featuring high-fidelity music playback, spinning turntable disc mechanics, dynamic audio spectrum visualizer, video player, vertical swipe Shorts Reels, local MediaStore scanning, and live playback statistics.",
+                        text = "Complete multimedia suite featuring high-fidelity music playback, spinning turntable disc mechanics, dynamic audio spectrum visualizer, video player, vertical swipe Shorts Reels with auto-scroll, background playback service, and live statistics.",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 16.sp

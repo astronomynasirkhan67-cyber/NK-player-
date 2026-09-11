@@ -118,6 +118,9 @@ class MusicAudioEngine(private val context: Context) {
                         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                         .build()
                 )
+                try {
+                    setWakeMode(context.applicationContext, android.os.PowerManager.PARTIAL_WAKE_LOCK)
+                } catch (_: Exception) {}
                 setDataSource(context.applicationContext, uri)
                 setOnPreparedListener { mp ->
                     try {

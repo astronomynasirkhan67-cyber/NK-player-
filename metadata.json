@@ -1,6 +1,6 @@
 {
-  "name": "Music for Nasir",
-  "description": "Fascinating music player with dynamic spinning vinyl turntable disc, most-played tracks ranking, custom themes, visualizers, and playlists.",
+  "name": "NK Player",
+  "description": "Fascinating music and video player with dynamic spinning vinyl turntable disc, vertical Shorts feed with auto-scroll, background playback, custom themes, and sound visualizers.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

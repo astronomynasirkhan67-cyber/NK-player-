@@ -24,7 +24,7 @@ class ExampleRobolectricTest {
   fun `read string from context`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val appName = context.getString(R.string.app_name)
-    assertEquals("Music for Nasir", appName)
+    assertEquals("NK Player", appName)
   }
 
   @Test

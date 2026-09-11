@@ -131,7 +131,7 @@ fun NowPlayingScreen(
         ) {
             Column {
                 Text(
-                    text = "MUSIC NASIR KHAN",
+                    text = "NK PLAYER",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 2.sp,
@@ -254,7 +254,7 @@ fun NowPlayingScreen(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "${song?.artist ?: "Nasir Khan"} • ${song?.album ?: ""}",
+                    text = "${song?.artist ?: "NK Player"} • ${song?.album ?: ""}",
                     fontSize = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
