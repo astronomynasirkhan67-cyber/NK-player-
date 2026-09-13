@@ -28,12 +28,12 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Autorenew
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardDoubleArrowDown
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PauseCircleOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Videocam
@@ -50,9 +50,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,8 +71,10 @@ import com.example.ui.components.AspectFitVideoView
 import com.example.ui.components.VideoDimensionHelper
 import com.example.ui.viewmodel.MusicViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -100,7 +102,7 @@ fun ShortsFeedScreen(
         rawShorts.filter { it.durationSeconds in 1..uiState.shortsThresholdSeconds }
     }
 
-    // Stop playback when leaving the Shorts screen
+    // Stop playback and cancel any pending auto-scroll when leaving the Shorts screen
     DisposableEffect(Unit) {
         onDispose {
             viewModel.pauseVideo()
@@ -182,13 +184,23 @@ fun ShortsFeedScreen(
                 pageCount = { validShorts.size }
             )
 
+            val coroutineScope = rememberCoroutineScope()
+
             // Track user paused state per active short
             var isCurrentShortPaused by remember { mutableStateOf(false) }
-            var completionTrigger by remember { mutableLongStateOf(0L) }
+
+            // Guard/Lock mechanism: ensures one completed video produces exactly one automatic transition
+            var isAutoScrollLocked by remember { mutableStateOf(false) }
+            var autoScrollJob by remember { mutableStateOf<Job?>(null) }
 
             // Sync active page with ViewModel state to preserve location across tabs
             LaunchedEffect(pagerState.currentPage) {
+                // Reset transition lock for the new video
+                isAutoScrollLocked = false
+                autoScrollJob?.cancel()
+                autoScrollJob = null
                 isCurrentShortPaused = false
+
                 val activeVideo = validShorts.getOrNull(pagerState.currentPage)
                 if (activeVideo != null) {
                     viewModel.setShortsCurrentIndex(pagerState.currentPage, activeVideo.id)
@@ -196,42 +208,57 @@ fun ShortsFeedScreen(
                 }
             }
 
-            // Intelligent Auto-Scroll Handler:
-            // Advances when the current Short finishes, or at an appropriate viewing duration.
-            // Avoids rapid skipping, resets cleanly on manual swipe, and respects pause state.
-            LaunchedEffect(
-                pagerState.currentPage,
-                uiState.isShortsAutoScrollEnabled,
-                isCurrentShortPaused,
-                completionTrigger
-            ) {
-                if (!uiState.isShortsAutoScrollEnabled || isCurrentShortPaused || validShorts.isEmpty()) {
-                    return@LaunchedEffect
+            // Immediately cancel any pending auto-scroll when user turns Auto Scroll OFF
+            LaunchedEffect(uiState.isShortsAutoScrollEnabled) {
+                if (!uiState.isShortsAutoScrollEnabled) {
+                    autoScrollJob?.cancel()
+                    autoScrollJob = null
+                    isAutoScrollLocked = false
                 }
+            }
 
-                val currentVideo = validShorts.getOrNull(pagerState.currentPage) ?: return@LaunchedEffect
-
-                val delayMillis = if (completionTrigger > 0L) {
-                    // Video natural completion occurred: give a gentle 500ms transition buffer
-                    500L
-                } else {
-                    // Video playing: wait until duration + 1s, with safe boundaries
-                    val durSec = currentVideo.durationSeconds
-                    if (durSec > 0) {
-                        ((durSec + 1L) * 1000L).coerceIn(8_000L, 90_000L)
-                    } else {
-                        10_000L
+            // Strictly video-completion based auto-scroll handler.
+            // NO repeating timers, NO duration estimations:
+            // Only a genuine end-of-playback completion callback triggers moving to the next item.
+            val handleVideoCompletion: (String) -> Unit = { completedVideoId ->
+                val currentVideo = validShorts.getOrNull(pagerState.currentPage)
+                if (uiState.isShortsAutoScrollEnabled &&
+                    !isCurrentShortPaused &&
+                    currentVideo != null &&
+                    currentVideo.id == completedVideoId &&
+                    validShorts.size > 1 &&
+                    !isAutoScrollLocked &&
+                    !pagerState.isScrollInProgress
+                ) {
+                    // Transition lock engaged immediately to prevent duplicate scroll calls
+                    isAutoScrollLocked = true
+                    autoScrollJob?.cancel()
+                    autoScrollJob = coroutineScope.launch {
+                        try {
+                            // Brief 200ms natural breathing delay after complete end-of-media before moving
+                            delay(200L)
+                            if (isActive && uiState.isShortsAutoScrollEnabled && !isCurrentShortPaused) {
+                                val nextPage = (pagerState.currentPage + 1) % validShorts.size
+                                pagerState.animateScrollToPage(
+                                    page = nextPage,
+                                    animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                                )
+                            }
+                        } finally {
+                            if (!uiState.isShortsAutoScrollEnabled) {
+                                isAutoScrollLocked = false
+                            }
+                        }
                     }
                 }
+            }
 
-                delay(delayMillis)
-
-                if (isActive && uiState.isShortsAutoScrollEnabled && !isCurrentShortPaused) {
-                    val nextPage = (pagerState.currentPage + 1) % validShorts.size
-                    pagerState.animateScrollToPage(
-                        nextPage,
-                        animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing)
-                    )
+            // Clean up any pending transition if Shorts screen unmounts / user navigates away
+            DisposableEffect(Unit) {
+                onDispose {
+                    autoScrollJob?.cancel()
+                    autoScrollJob = null
+                    isAutoScrollLocked = false
                 }
             }
 
@@ -251,6 +278,7 @@ fun ShortsFeedScreen(
                     video = video,
                     isActive = isActive,
                     isMuted = uiState.isShortsMuted,
+                    canAutoAdvance = uiState.isShortsAutoScrollEnabled && validShorts.size > 1,
                     viewModel = viewModel,
                     isUserPaused = if (isActive) isCurrentShortPaused else false,
                     onToggleUserPause = {
@@ -258,8 +286,8 @@ fun ShortsFeedScreen(
                             isCurrentShortPaused = !isCurrentShortPaused
                         }
                     },
-                    onVideoCompleted = {
-                        completionTrigger = System.currentTimeMillis()
+                    onVideoCompleted = { completedId ->
+                        handleVideoCompletion(completedId)
                     }
                 )
             }
@@ -267,7 +295,7 @@ fun ShortsFeedScreen(
             // Sleek, Non-Intrusive Top Overlay:
             // 1. Position badge: Shorts X/Y
             // 2. Mute / Unmute quick toggle
-            // 3. Auto Scroll toggle: "Auto Scroll: ON" / "Auto Scroll: OFF"
+            // 3. Auto Scroll toggle: Arrow-style ICON ONLY (NO text displayed)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -329,34 +357,28 @@ fun ShortsFeedScreen(
                         }
                     }
 
-                    // Auto Scroll Toggle Button ("Auto Scroll: ON" / "Auto Scroll: OFF")
+                    // Auto Scroll Toggle Button (ICON ONLY - Arrow style, NO text)
                     Surface(
-                        shape = RoundedCornerShape(18.dp),
+                        shape = CircleShape,
                         color = if (uiState.isShortsAutoScrollEnabled) Color(0xFF00E5FF) else Color.Black.copy(alpha = 0.60f),
                         border = BorderStroke(
                             1.dp,
-                            if (uiState.isShortsAutoScrollEnabled) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.25f)
+                            if (uiState.isShortsAutoScrollEnabled) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.20f)
                         ),
                         modifier = Modifier
                             .clickable { viewModel.toggleShortsAutoScroll() }
                             .testTag("shorts_auto_scroll_toggle")
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        Box(modifier = Modifier.size(34.dp), contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = if (uiState.isShortsAutoScrollEnabled) Icons.Default.Autorenew else Icons.Default.PauseCircleOutline,
-                                contentDescription = "Auto Scroll Mode",
+                                imageVector = if (uiState.isShortsAutoScrollEnabled) {
+                                    Icons.Default.KeyboardDoubleArrowDown
+                                } else {
+                                    Icons.Default.KeyboardArrowDown
+                                },
+                                contentDescription = if (uiState.isShortsAutoScrollEnabled) "Turn Auto Scroll Off" else "Turn Auto Scroll On",
                                 tint = if (uiState.isShortsAutoScrollEnabled) Color.Black else Color.White,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(
-                                text = if (uiState.isShortsAutoScrollEnabled) "Auto Scroll: ON" else "Auto Scroll: OFF",
-                                color = if (uiState.isShortsAutoScrollEnabled) Color.Black else Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
+                                modifier = Modifier.size(19.dp)
                             )
                         }
                     }
@@ -378,10 +400,11 @@ private fun ShortVideoPage(
     video: VideoItem,
     isActive: Boolean,
     isMuted: Boolean,
+    canAutoAdvance: Boolean,
     viewModel: MusicViewModel,
     isUserPaused: Boolean,
     onToggleUserPause: () -> Unit,
-    onVideoCompleted: () -> Unit
+    onVideoCompleted: (String) -> Unit
 ) {
     val context = LocalContext.current
     var videoViewRef by remember { mutableStateOf<AspectFitVideoView?>(null) }
@@ -484,10 +507,14 @@ private fun ShortVideoPage(
                             }
                             setOnCompletionListener {
                                 viewModel.onVideoCompleted(video.id)
-                                onVideoCompleted()
-                                seekTo(0)
-                                if (!isUserPaused) {
-                                    start()
+                                if (isActive) {
+                                    onVideoCompleted(video.id)
+                                }
+                                if (!canAutoAdvance || !isActive) {
+                                    seekTo(0)
+                                    if (!isUserPaused) {
+                                        start()
+                                    }
                                 }
                             }
                             videoViewRef = this
@@ -495,14 +522,8 @@ private fun ShortVideoPage(
                     },
                     update = { view ->
                         videoViewRef = view
-                        if (isActive && !isUserPaused) {
-                            if (!view.isPlaying) {
-                                view.start()
-                            }
-                        } else {
-                            if (view.isPlaying) {
-                                view.pause()
-                            }
+                        if (!isActive && view.isPlaying) {
+                            view.pause()
                         }
                     },
                     modifier = Modifier.size(fitWidth, fitHeight)

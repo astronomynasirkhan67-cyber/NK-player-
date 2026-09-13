@@ -70,4 +70,38 @@ class ExampleRobolectricTest {
     val result = MediaFileManager.deleteMedia(context, target)
     assertTrue("Should return Failure when file is missing from storage", result is MediaDeleteResult.Failure)
   }
+
+  @Test
+  fun `test shorts auto scroll state toggles cleanly and starts disabled`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val viewModel = com.example.ui.viewmodel.MusicViewModel(app)
+
+    // Verify initially disabled (OFF)
+    assertFalse("Auto-scroll must be disabled by default", viewModel.uiState.value.isShortsAutoScrollEnabled)
+
+    // Toggle ON
+    viewModel.toggleShortsAutoScroll()
+    assertTrue("Auto-scroll should be enabled after toggle", viewModel.uiState.value.isShortsAutoScrollEnabled)
+
+    // Toggle OFF
+    viewModel.toggleShortsAutoScroll()
+    assertFalse("Auto-scroll should be disabled after second toggle", viewModel.uiState.value.isShortsAutoScrollEnabled)
+
+    // Test explicit setter
+    viewModel.setShortsAutoScroll(true)
+    assertTrue(viewModel.uiState.value.isShortsAutoScrollEnabled)
+    viewModel.setShortsAutoScroll(false)
+    assertFalse(viewModel.uiState.value.isShortsAutoScrollEnabled)
+  }
+
+  @Test
+  fun `test shorts scroll position preservation across navigation`() {
+    val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+    val viewModel = com.example.ui.viewmodel.MusicViewModel(app)
+
+    assertEquals(0, viewModel.uiState.value.shortsCurrentIndex)
+    viewModel.setShortsCurrentIndex(3, "short_video_3")
+    assertEquals(3, viewModel.uiState.value.shortsCurrentIndex)
+    assertEquals("short_video_3", viewModel.uiState.value.lastViewedShortId)
+  }
 }
