@@ -189,17 +189,19 @@ fun ShortsFeedScreen(
             // Track user paused state per active short
             var isCurrentShortPaused by remember { mutableStateOf(false) }
 
-            // Guard/Lock mechanism: ensures one completed video produces exactly one automatic transition
-            var isAutoScrollLocked by remember { mutableStateOf(false) }
-            var autoScrollJob by remember { mutableStateOf<Job?>(null) }
+            // Guard/Lock mechanism: ensures one completed video produces exactly one full-page transition
+            var isAutoNavigating by remember { mutableStateOf(false) }
+            var autoNavJob by remember { mutableStateOf<Job?>(null) }
 
             // Sync active page with ViewModel state to preserve location across tabs
             LaunchedEffect(pagerState.currentPage) {
-                // Reset transition lock for the new video
-                isAutoScrollLocked = false
-                autoScrollJob?.cancel()
-                autoScrollJob = null
                 isCurrentShortPaused = false
+                // Only cancel transition job if the page change was triggered externally (e.g. manual swipe),
+                // NEVER cancel it while auto-navigation is actively in-flight!
+                if (!isAutoNavigating) {
+                    autoNavJob?.cancel()
+                    autoNavJob = null
+                }
 
                 val activeVideo = validShorts.getOrNull(pagerState.currentPage)
                 if (activeVideo != null) {
@@ -208,18 +210,21 @@ fun ShortsFeedScreen(
                 }
             }
 
-            // Immediately cancel any pending auto-scroll when user turns Auto Scroll OFF
+            // Immediately cancel any pending auto-next when user turns Auto Next / Auto Scroll OFF
             LaunchedEffect(uiState.isShortsAutoScrollEnabled) {
                 if (!uiState.isShortsAutoScrollEnabled) {
-                    autoScrollJob?.cancel()
-                    autoScrollJob = null
-                    isAutoScrollLocked = false
+                    autoNavJob?.cancel()
+                    autoNavJob = null
+                    isAutoNavigating = false
                 }
             }
 
-            // Strictly video-completion based auto-scroll handler.
-            // NO repeating timers, NO duration estimations:
-            // Only a genuine end-of-playback completion callback triggers moving to the next item.
+            // Strictly video-completion based Auto-Next Page Snap handler.
+            // When a Short completes:
+            // 1. Detect genuine video completion (no timers)
+            // 2. Determine the next Short index
+            // 3. Move directly to the next page and snap to 0 offset (full-page)
+            // 4. Start playback of the next Short only after it is fully positioned
             val handleVideoCompletion: (String) -> Unit = { completedVideoId ->
                 val currentVideo = validShorts.getOrNull(pagerState.currentPage)
                 if (uiState.isShortsAutoScrollEnabled &&
@@ -227,27 +232,31 @@ fun ShortsFeedScreen(
                     currentVideo != null &&
                     currentVideo.id == completedVideoId &&
                     validShorts.size > 1 &&
-                    !isAutoScrollLocked &&
+                    !isAutoNavigating &&
                     !pagerState.isScrollInProgress
                 ) {
-                    // Transition lock engaged immediately to prevent duplicate scroll calls
-                    isAutoScrollLocked = true
-                    autoScrollJob?.cancel()
-                    autoScrollJob = coroutineScope.launch {
+                    // Transition lock engaged immediately to prevent duplicate triggers
+                    isAutoNavigating = true
+                    autoNavJob?.cancel()
+                    autoNavJob = coroutineScope.launch {
                         try {
-                            // Brief 200ms natural breathing delay after complete end-of-media before moving
-                            delay(200L)
+                            // Brief 150ms natural breathing delay after complete end-of-media before page snap
+                            delay(150L)
                             if (isActive && uiState.isShortsAutoScrollEnabled && !isCurrentShortPaused) {
-                                val nextPage = (pagerState.currentPage + 1) % validShorts.size
+                                val targetPage = (pagerState.currentPage + 1) % validShorts.size
+                                // Step 1: Smoothly snap to the target page
                                 pagerState.animateScrollToPage(
-                                    page = nextPage,
-                                    animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+                                    page = targetPage,
+                                    pageOffsetFraction = 0f,
+                                    animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing)
                                 )
+                                // Step 2: Full-screen Snap Assurance - guarantees 100% exact zero offset snap
+                                pagerState.scrollToPage(page = targetPage, pageOffsetFraction = 0f)
                             }
+                        } catch (_: Exception) {
+                            // Handled gracefully if interrupted by user gesture
                         } finally {
-                            if (!uiState.isShortsAutoScrollEnabled) {
-                                isAutoScrollLocked = false
-                            }
+                            isAutoNavigating = false
                         }
                     }
                 }
@@ -256,13 +265,13 @@ fun ShortsFeedScreen(
             // Clean up any pending transition if Shorts screen unmounts / user navigates away
             DisposableEffect(Unit) {
                 onDispose {
-                    autoScrollJob?.cancel()
-                    autoScrollJob = null
-                    isAutoScrollLocked = false
+                    autoNavJob?.cancel()
+                    autoNavJob = null
+                    isAutoNavigating = false
                 }
             }
 
-            // Vertical Pager
+            // Vertical Pager: Full-Page per Short
             VerticalPager(
                 state = pagerState,
                 modifier = Modifier
@@ -272,7 +281,8 @@ fun ShortsFeedScreen(
                 key = { page -> validShorts.getOrNull(page)?.id ?: page }
             ) { page ->
                 val video = validShorts[page]
-                val isActive = page == pagerState.currentPage
+                // Only activate video playback once the target page is fully positioned and settled
+                val isActive = (page == pagerState.currentPage) && !isAutoNavigating
 
                 ShortVideoPage(
                     video = video,
@@ -295,11 +305,10 @@ fun ShortsFeedScreen(
             // Sleek, Non-Intrusive Top Overlay:
             // 1. Position badge: Shorts X/Y
             // 2. Mute / Unmute quick toggle
-            // 3. Auto Scroll toggle: Arrow-style ICON ONLY (NO text displayed)
+            // 3. Auto Scroll / Auto Next toggle: Arrow-style ICON ONLY (NO text displayed)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
                     .align(Alignment.TopCenter),
                 horizontalArrangement = Arrangement.SpaceBetween,
